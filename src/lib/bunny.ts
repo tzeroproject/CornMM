@@ -36,7 +36,7 @@ export function getBunnyHlsUrl(videoId: string, cdnHostname?: string): string {
  * Returns standard Bunny thumbnail image URL
  */
 export function getBunnyThumbnailUrl(videoId: string, cdnHostname?: string): string {
-  const host = cdnHostname || 'vz-cdn.bunnycdn.net';
+  const host = cdnHostname || 'vz-cdn.bunny.net';
   return `https://${host}/${videoId}/thumbnail.jpg`;
 }
 
@@ -66,29 +66,45 @@ export interface BunnyUploadError extends Error {
 }
 
 /**
- * Helper to initialize Bunny video creation via backend proxy
+ * Initialize a REAL Bunny Stream video via the backend proxy.
+ *
+ * `forceFallback` is intentionally ignored for compatibility with older callers.
+ * CornMM must never silently switch to demo/local video data.
  */
 export async function initBunnyVideoUpload(
   title: string,
-  forceFallback: boolean = false
+  _forceFallback: boolean = false
 ): Promise<BunnyUploadInitResult> {
   const res = await fetch('/api/bunny/create-video', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, forceFallback }),
+    // Always request a real Bunny Stream video.
+    body: JSON.stringify({ title, forceFallback: false }),
   });
 
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    const errorMsg = data.guidance 
+    const errorMsg = data.guidance
       ? `${data.error}: ${data.guidance}`
       : (data.error || 'Failed to initialize Bunny video upload');
     const customErr = new Error(errorMsg) as BunnyUploadError;
     customErr.guidance = data.guidance;
     customErr.details = data.details;
     customErr.statusCode = data.statusCode;
-    customErr.allowFallback = data.allowFallback;
+    customErr.allowFallback = false;
+    throw customErr;
+  }
+
+  // Never accept the backend's demo/prototype response as a successful upload.
+  if (data.isSimulated || String(data.videoId || '').startsWith('bny_')) {
+    const customErr = new Error(
+      'Real Bunny Stream is not configured. Demo/prototype video uploads are disabled.'
+    ) as BunnyUploadError;
+    customErr.guidance =
+      'Configure BUNNY_API_KEY, BUNNY_LIBRARY_ID, and BUNNY_CDN_HOSTNAME on the server, then try again.';
+    customErr.statusCode = 503;
+    customErr.allowFallback = false;
     throw customErr;
   }
 
@@ -133,14 +149,12 @@ export function uploadVideoBinary({
     };
 
     xhr.onerror = () => {
-      // If direct PUT had network/CORS error and we haven't tried proxy yet, fallback gracefully
       reject(new Error('Network error during video upload'));
     };
 
     xhr.send(file);
   });
 }
-
 
 /**
  * Check transcoding status from server
