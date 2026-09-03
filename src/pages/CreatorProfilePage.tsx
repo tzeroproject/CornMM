@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { CheckCircle, Globe, Video as VideoIcon, Users, Eye, Calendar, UserPlus, UserCheck } from 'lucide-react';
 import { Profile, Video } from '../types';
-import { INITIAL_PROFILES } from '../lib/mockData';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { videoService } from '../services/videoService';
 import { interactionService } from '../services/interactionService';
 import { VideoGrid } from '../components/video/VideoGrid';
@@ -22,27 +22,58 @@ export const CreatorProfilePage: React.FC = () => {
 
   useEffect(() => {
     async function loadProfile() {
+      if (!username) return;
       setIsLoading(true);
-      // Find matching profile
-      const found = INITIAL_PROFILES.find(
-        (p) => p.username.toLowerCase() === username?.toLowerCase() || p.id === username
-      ) || (user?.username === username ? user : INITIAL_PROFILES[1]);
 
-      if (found) {
-        setCreator(found);
-        setSubCount(found.subscriber_count || 100);
+      let foundProfile: Profile | null = null;
+
+      if (user && (user.username.toLowerCase() === username.toLowerCase() || user.id === username)) {
+        foundProfile = user;
+      } else if (isSupabaseConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .or(`username.ilike.${username},id.eq.${username}`)
+            .maybeSingle();
+
+          if (!error && data) {
+            foundProfile = data as Profile;
+          }
+        } catch (e) {
+          console.warn('Error fetching creator profile from Supabase:', e);
+        }
+      }
+
+      // If not found in DB but matching video creator exists
+      if (!foundProfile) {
+        const { videos: allVideos } = await videoService.getVideos({ pageSize: 50 });
+        const match = allVideos.find(
+          v => v.creator?.username?.toLowerCase() === username.toLowerCase() || v.creator_id === username
+        );
+        if (match?.creator) {
+          foundProfile = match.creator;
+        }
+      }
+
+      if (foundProfile) {
+        setCreator(foundProfile);
+        setSubCount(foundProfile.subscriber_count || 0);
 
         // Fetch videos by this creator
         const res = await videoService.getVideos({
-          creatorId: found.id,
+          creatorId: foundProfile.id,
           pageSize: 24,
         });
         setVideos(res.videos);
 
         if (user) {
-          const subbed = await interactionService.isSubscribed(user.id, found.id);
+          const subbed = await interactionService.isSubscribed(user.id, foundProfile.id);
           setIsSubscribed(subbed);
         }
+      } else {
+        setCreator(null);
+        setVideos([]);
       }
       setIsLoading(false);
     }

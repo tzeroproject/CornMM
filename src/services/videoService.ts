@@ -1,28 +1,46 @@
 import { Video, Category, Tag, ModerationStatus, VideoVisibility } from '../types';
-import { INITIAL_VIDEOS, INITIAL_CATEGORIES, INITIAL_PROFILES, INITIAL_TAGS } from '../lib/mockData';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, isSchemaReady, handleSupabaseError } from '../lib/supabase';
 
-// In-browser persistent storage key for preview mode
-const STORAGE_VIDEOS_KEY = 'streamsphere_videos';
+// Persistent storage fallback when running without cloud credentials
+const STORAGE_VIDEOS_KEY = 'streamsphere_production_videos_v2';
+
+export const DEFAULT_CATEGORIES: Category[] = [
+  { id: 'cat-tech', name: 'Technology & Engineering', slug: 'technology', description: 'Coding, hardware, AI systems, and tech tutorials', icon: 'Cpu', video_count: 0 },
+  { id: 'cat-cinema', name: 'Cinema & Documentary', slug: 'cinema', description: 'Cinematography, short films, color grading, and lens tests', icon: 'Film', video_count: 0 },
+  { id: 'cat-creative', name: 'Creative Arts & Design', slug: 'creative-arts', description: 'Visual effects, 3D modeling, illustration, and design philosophy', icon: 'Palette', video_count: 0 },
+  { id: 'cat-science', name: 'Science & Education', slug: 'science', description: 'Physics, mathematics, space exploration, and academic lectures', icon: 'FlaskConical', video_count: 0 },
+  { id: 'cat-music', name: 'Music & Soundscapes', slug: 'music', description: 'Original electronic compositions, modular synth jams, and live sets', icon: 'Music', video_count: 0 },
+  { id: 'cat-gaming', name: 'Gaming & Esports', slug: 'gaming', description: 'Speedruns, competitive matches, and interactive gameplay', icon: 'Gamepad2', video_count: 0 },
+];
+
+export const DEFAULT_TAGS: Tag[] = [
+  { id: 'tag-tutorial', name: 'Tutorial', slug: 'tutorial' },
+  { id: 'tag-4k', name: '4K Ultra HD', slug: '4k' },
+  { id: 'tag-hls', name: 'HLS Stream', slug: 'hls' },
+  { id: 'tag-hdr', name: 'HDR10', slug: 'hdr' },
+  { id: 'tag-oss', name: 'Open Source', slug: 'open-source' },
+  { id: 'tag-cine', name: 'Cinematography', slug: 'cinematography' },
+];
+
+export const DEFAULT_STARTER_VIDEOS: Video[] = [];
 
 function getStoredVideos(): Video[] {
   try {
     const data = localStorage.getItem(STORAGE_VIDEOS_KEY);
     if (data) {
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
     }
   } catch (e) {
     console.error('Error loading stored videos:', e);
   }
-  // Initialize with seed data
-  const initial = INITIAL_VIDEOS.map(v => ({
-    ...v,
-    category: INITIAL_CATEGORIES.find(c => c.id === v.category_id),
-    creator: INITIAL_PROFILES.find(p => p.id === v.creator_id),
-    tags: INITIAL_TAGS.slice(0, 3),
-  }));
-  saveStoredVideos(initial);
-  return initial;
+  // Initialize with curated starter videos
+  try {
+    localStorage.setItem(STORAGE_VIDEOS_KEY, JSON.stringify(DEFAULT_STARTER_VIDEOS));
+  } catch (e) {}
+  return DEFAULT_STARTER_VIDEOS;
 }
 
 function saveStoredVideos(videos: Video[]) {
@@ -43,7 +61,7 @@ export interface VideoFilterOptions {
   visibility?: VideoVisibility;
   page?: number;
   pageSize?: number;
-  includeAllStatusForUser?: string; // allow creator/admin to see drafts/pending
+  includeAllStatusForUser?: string; // allow creator to see their drafts/pending
   includeUnpublished?: boolean;
 }
 
@@ -63,9 +81,11 @@ export const videoService = {
       includeUnpublished,
     } = options;
 
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isSchemaReady()) {
       try {
-        let query = supabase.from('videos').select('*, category:categories(*), creator:profiles(*)', { count: 'exact' });
+        let query = supabase
+          .from('videos')
+          .select('*, category:categories(*), creator:profiles(*)', { count: 'exact' });
 
         if (includeUnpublished || includeAllStatusForUser) {
           if (includeAllStatusForUser) {
@@ -92,20 +112,21 @@ export const videoService = {
         query = query.range(from, to);
 
         const { data, count, error } = await query;
-        if (!error && data) {
+        if (error) {
+          handleSupabaseError(error, 'getVideos');
+        } else if (data) {
           return { videos: data as Video[], total: count || 0 };
         }
       } catch (err) {
-        console.warn('Supabase query failed, falling back to local database:', err);
+        handleSupabaseError(err, 'getVideos catch');
       }
     }
 
-    // Local storage state query
+    // Local fallback
     let list = getStoredVideos();
 
-    // Filter by moderation & visibility
     if (includeUnpublished) {
-      // Return all videos without filtering by status
+      // Return all without status filter
     } else if (!includeAllStatusForUser) {
       list = list.filter(v => v.moderation_status === status && (visibility ? v.visibility === visibility : true));
     } else {
@@ -122,8 +143,8 @@ export const videoService = {
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase().trim();
-      list = list.filter(v => 
-        v.title.toLowerCase().includes(q) || 
+      list = list.filter(v =>
+        v.title.toLowerCase().includes(q) ||
         v.description.toLowerCase().includes(q) ||
         v.creator?.display_name.toLowerCase().includes(q)
       );
@@ -133,7 +154,6 @@ export const videoService = {
       list = list.filter(v => v.tags?.some(t => t.slug === tag || t.name.toLowerCase() === tag.toLowerCase()));
     }
 
-    // Sorting
     if (sortBy === 'trending') {
       list.sort((a, b) => (b.views * 0.7 + b.likes_count * 0.3) - (a.views * 0.7 + a.likes_count * 0.3));
     } else if (sortBy === 'views') {
@@ -152,22 +172,25 @@ export const videoService = {
   },
 
   async getVideoById(id: string): Promise<Video | null> {
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isSchemaReady()) {
       try {
         const { data, error } = await supabase
           .from('videos')
           .select('*, category:categories(*), creator:profiles(*)')
-          .eq('id', id)
+          .or(`id.eq.${id},slug.eq.${id}`)
           .single();
-        if (!error && data) return data as Video;
+        if (error) {
+          handleSupabaseError(error, 'getVideoById');
+        } else if (data) {
+          return data as Video;
+        }
       } catch (err) {
-        console.warn('Supabase fetch failed, checking local storage:', err);
+        handleSupabaseError(err, 'getVideoById catch');
       }
     }
 
     const list = getStoredVideos();
-    const item = list.find(v => v.id === id || v.slug === id);
-    return item || null;
+    return list.find(v => v.id === id || v.slug === id) || null;
   },
 
   async getRelatedVideos(currentVideoId: string, categoryId?: string, limit = 6): Promise<Video[]> {
@@ -185,40 +208,65 @@ export const videoService = {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '') + '-' + Math.random().toString(36).substring(2, 7);
 
+    const now = new Date().toISOString();
+    const fallbackCategory = DEFAULT_CATEGORIES.find(c => c.id === (videoData.category_id || 'cat-tech')) || DEFAULT_CATEGORIES[0];
     const newVideo: Video = {
-      id: 'vid_' + Math.random().toString(36).substring(2, 9),
-      bunny_video_id: videoData.bunny_video_id || `bny_${Date.now()}`,
+      id: crypto.randomUUID ? crypto.randomUUID() : 'vid_' + Math.random().toString(36).substring(2, 9),
+      bunny_video_id: videoData.bunny_video_id,
       title: videoData.title || 'Untitled Video',
-      slug: slug,
+      slug,
       description: videoData.description || '',
       thumbnail_url: videoData.thumbnail_url || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=800&auto=format&fit=crop&q=80',
-      duration: videoData.duration || 180,
+      duration: videoData.duration || 0,
       category_id: videoData.category_id || 'cat-tech',
-      creator_id: videoData.creator_id || 'user-admin',
+      category: videoData.category || fallbackCategory,
+      creator_id: videoData.creator_id || '',
+      creator: videoData.creator,
       visibility: videoData.visibility || 'public',
-      moderation_status: videoData.moderation_status || 'published',
+      moderation_status: videoData.moderation_status || 'pending_review',
       is_age_restricted: Boolean(videoData.is_age_restricted),
       allow_comments: videoData.allow_comments ?? true,
       views: 0,
       likes_count: 0,
       comments_count: 0,
-      video_url: videoData.video_url || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      video_url: videoData.video_url || '',
+      created_at: now,
+      updated_at: now,
     };
 
-    // Attach creator & category
-    const cat = INITIAL_CATEGORIES.find(c => c.id === newVideo.category_id);
-    const creator = INITIAL_PROFILES.find(p => p.id === newVideo.creator_id) || INITIAL_PROFILES[0];
-    newVideo.category = cat;
-    newVideo.creator = creator;
-
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isSchemaReady()) {
       try {
-        const { data, error } = await supabase.from('videos').insert([newVideo]).select().single();
-        if (!error && data) return data as Video;
+        const { data, error } = await supabase
+          .from('videos')
+          .insert([{
+            id: newVideo.id,
+            bunny_video_id: newVideo.bunny_video_id,
+            title: newVideo.title,
+            slug: newVideo.slug,
+            description: newVideo.description,
+            thumbnail_url: newVideo.thumbnail_url,
+            duration: newVideo.duration,
+            category_id: newVideo.category_id,
+            creator_id: newVideo.creator_id,
+            visibility: newVideo.visibility,
+            moderation_status: newVideo.moderation_status,
+            is_age_restricted: newVideo.is_age_restricted,
+            allow_comments: newVideo.allow_comments,
+            views: 0,
+            likes_count: 0,
+            comments_count: 0,
+            video_url: newVideo.video_url,
+          }])
+          .select('*, category:categories(*), creator:profiles(*)')
+          .single();
+
+        if (error) {
+          handleSupabaseError(error, 'insert video');
+        } else if (data) {
+          return data as Video;
+        }
       } catch (err) {
-        console.warn('Supabase insert failed, saving locally:', err);
+        handleSupabaseError(err, 'insert video catch');
       }
     }
 
@@ -229,24 +277,30 @@ export const videoService = {
   },
 
   async updateVideo(id: string, updates: Partial<Video>): Promise<Video> {
-    if (isSupabaseConfigured) {
+    const updatedAt = new Date().toISOString();
+
+    if (isSupabaseConfigured && isSchemaReady()) {
       try {
         const { data, error } = await supabase
           .from('videos')
-          .update({ ...updates, updated_at: new Date().toISOString() })
+          .update({ ...updates, updated_at: updatedAt })
           .eq('id', id)
-          .select()
+          .select('*, category:categories(*), creator:profiles(*)')
           .single();
-        if (!error && data) return data as Video;
+        if (error) {
+          handleSupabaseError(error, 'updateVideo');
+        } else if (data) {
+          return data as Video;
+        }
       } catch (e) {
-        console.warn('Supabase update failed:', e);
+        handleSupabaseError(e, 'updateVideo catch');
       }
     }
 
     const list = getStoredVideos();
     const index = list.findIndex(v => v.id === id);
     if (index !== -1) {
-      list[index] = { ...list[index], ...updates, updated_at: new Date().toISOString() };
+      list[index] = { ...list[index], ...updates, updated_at: updatedAt };
       saveStoredVideos(list);
       return list[index];
     }
@@ -254,11 +308,12 @@ export const videoService = {
   },
 
   async deleteVideo(id: string): Promise<boolean> {
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isSchemaReady()) {
       try {
-        await supabase.from('videos').delete().eq('id', id);
+        const { error } = await supabase.from('videos').delete().eq('id', id);
+        if (error) handleSupabaseError(error, 'deleteVideo');
       } catch (e) {
-        console.warn('Supabase delete failed:', e);
+        handleSupabaseError(e, 'deleteVideo catch');
       }
     }
 
@@ -268,7 +323,7 @@ export const videoService = {
   },
 
   /**
-   * Safe server-backed view increment with client cooldown
+   * Safe server-backed view increment with cooldown deduplication
    */
   async recordView(videoId: string): Promise<void> {
     try {
@@ -277,7 +332,6 @@ export const videoService = {
       });
       const data = await res.json();
       if (data.incremented) {
-        // Increment in local state as well
         const list = getStoredVideos();
         const v = list.find(item => item.id === videoId);
         if (v) {
@@ -291,26 +345,80 @@ export const videoService = {
   },
 
   async getCategories(): Promise<Category[]> {
-    if (isSupabaseConfigured) {
+    const list = getStoredVideos();
+    const categoriesWithCount = DEFAULT_CATEGORIES.map(c => ({
+      ...c,
+      video_count: list.filter(v => v.category_id === c.id).length
+    }));
+
+    if (isSupabaseConfigured && isSchemaReady()) {
       try {
-        const { data, error } = await supabase.from('categories').select('*');
-        if (!error && data && data.length > 0) return data as Category[];
+        let cats: Category[] = [];
+        const { data, error } = await supabase.from('categories').select('*').order('name');
+        
+        if (error) {
+          handleSupabaseError(error, 'getCategories');
+        } else if (data && data.length > 0) {
+          cats = data as Category[];
+        } else if (data && data.length === 0) {
+          // Seed the categories table if empty
+          const seedData = DEFAULT_CATEGORIES.map(({ id, video_count, ...rest }) => rest);
+          const { data: inserted, error: insertErr } = await supabase.from('categories').insert(seedData).select('*');
+          if (insertErr) {
+            handleSupabaseError(insertErr, 'seedCategories');
+          } else if (inserted) {
+            cats = inserted as Category[];
+          }
+        }
+
+        if (cats.length > 0) {
+          // Fetch video counts for accurate display
+          const { data: videoData } = await supabase.from('videos').select('category_id');
+          if (videoData) {
+            const countMap = videoData.reduce((acc, v) => {
+              if (v.category_id) {
+                acc[v.category_id] = (acc[v.category_id] || 0) + 1;
+              }
+              return acc;
+            }, {} as Record<string, number>);
+            return cats.map(c => ({
+              ...c,
+              video_count: countMap[c.id] || 0
+            }));
+          }
+          return cats;
+        }
+
       } catch (e) {
-        // fallback
+        handleSupabaseError(e, 'getCategories catch');
       }
     }
-    return INITIAL_CATEGORIES;
+    return categoriesWithCount;
   },
 
   async getTags(): Promise<Tag[]> {
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isSchemaReady()) {
       try {
-        const { data, error } = await supabase.from('tags').select('*');
-        if (!error && data && data.length > 0) return data as Tag[];
+        const { data, error } = await supabase.from('tags').select('*').order('name');
+        
+        if (error) {
+          handleSupabaseError(error, 'getTags');
+        } else if (data && data.length > 0) {
+          return data as Tag[];
+        } else if (data && data.length === 0) {
+          // Seed tags if empty
+          const seedData = DEFAULT_TAGS.map(({ id, ...rest }) => rest);
+          const { data: inserted, error: insertErr } = await supabase.from('tags').insert(seedData).select('*');
+          if (insertErr) {
+            handleSupabaseError(insertErr, 'seedTags');
+          } else if (inserted) {
+            return inserted as Tag[];
+          }
+        }
       } catch (e) {
-        // fallback
+        handleSupabaseError(e, 'getTags catch');
       }
     }
-    return INITIAL_TAGS;
+    return DEFAULT_TAGS;
   },
 };

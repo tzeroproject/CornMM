@@ -1,18 +1,16 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Upload, Bell, Shield, User, LogOut, Menu, Video, CheckCircle2, ChevronDown, Sparkles } from 'lucide-react';
+import { Search, Upload, Bell, Shield, User, LogOut, Menu, Video, Settings } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { INITIAL_PROFILES } from '../../lib/mockData';
 
 interface NavbarProps {
   onToggleSidebar: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
-  const { user, isAdmin, isCreator, signOut, switchDemoProfile } = useAuth();
+  const { user, isAdmin, isCreator, signOut } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [showRoleSwitcher, setShowRoleSwitcher] = useState(false);
   const navigate = useNavigate();
 
   const handleSearch = (e: React.FormEvent) => {
@@ -65,78 +63,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
         </div>
       </form>
 
-      {/* Right: Actions, Demo Switcher, User Menu */}
+      {/* Right: Actions, Upload & Authenticated User Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
-        {/* Quick Role / Persona Switcher for Evaluation */}
-        <div className="relative">
-          <button
-            id="btn-role-switcher"
-            onClick={() => setShowRoleSwitcher(!showRoleSwitcher)}
-            title="Switch demo persona for testing"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-[#111111] border border-white/10 hover:border-white/20 text-zinc-300 hover:text-white transition-colors"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline text-zinc-400">Role:</span>
-            <span className="font-semibold text-amber-400 uppercase tracking-wide">
-              {user ? user.role : 'Guest'}
-            </span>
-            <ChevronDown className="w-3 h-3 text-zinc-500" />
-          </button>
-
-          {showRoleSwitcher && (
-            <div className="absolute right-0 mt-2 w-64 rounded-xl bg-[#0e0e0e] border border-white/10 shadow-2xl p-2 z-50">
-              <div className="px-2 py-1.5 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
-                Simulate Permissions
-              </div>
-              <button
-                onClick={() => { switchDemoProfile('user-admin'); setShowRoleSwitcher(false); }}
-                className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/5 flex items-center justify-between text-xs text-zinc-200 transition-colors"
-              >
-                <div>
-                  <div className="font-medium text-white">Platform Overseer (Admin)</div>
-                  <div className="text-[10px] text-zinc-400">Full moderation & audit access</div>
-                </div>
-                {user?.id === 'user-admin' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-              </button>
-
-              <button
-                onClick={() => { switchDemoProfile('creator-aria'); setShowRoleSwitcher(false); }}
-                className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/5 flex items-center justify-between text-xs text-zinc-200 transition-colors"
-              >
-                <div>
-                  <div className="font-medium text-white">Aria Chen (Creator)</div>
-                  <div className="text-[10px] text-zinc-400">Upload, analytics & editing</div>
-                </div>
-                {user?.id === 'creator-aria' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-              </button>
-
-              <button
-                onClick={() => { switchDemoProfile('creator-marcus'); setShowRoleSwitcher(false); }}
-                className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/5 flex items-center justify-between text-xs text-zinc-200 transition-colors"
-              >
-                <div>
-                  <div className="font-medium text-white">Marcus Vance (Creator)</div>
-                  <div className="text-[10px] text-zinc-400">Cinematographer profile</div>
-                </div>
-                {user?.id === 'creator-marcus' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-              </button>
-
-              <button
-                onClick={() => { switchDemoProfile(null); setShowRoleSwitcher(false); }}
-                className="w-full text-left px-2.5 py-2 rounded-lg hover:bg-white/5 flex items-center justify-between text-xs text-zinc-200 transition-colors border-t border-white/5 mt-1"
-              >
-                <div>
-                  <div className="font-medium text-white">Guest (Unauthenticated)</div>
-                  <div className="text-[10px] text-zinc-400">Public browsing view</div>
-                </div>
-                {!user && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-              </button>
-            </div>
-          )}
-        </div>
-
         {/* Upload Button */}
-        {user && (
+        {user && isCreator && (
           <Link
             to="/upload"
             id="btn-nav-upload"
@@ -171,7 +101,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
           </button>
         )}
 
-        {/* User Profile / Auth */}
+        {/* User Profile / Auth State */}
         {user ? (
           <div className="relative">
             <button
@@ -190,8 +120,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
             {showUserMenu && (
               <div className="absolute right-0 mt-2 w-52 rounded-xl bg-[#0e0e0e] border border-white/10 shadow-2xl p-1.5 z-50">
                 <div className="px-3 py-2 border-b border-white/5 mb-1">
-                  <p className="text-xs font-semibold text-white">{user.display_name}</p>
+                  <p className="text-xs font-semibold text-white truncate">{user.display_name}</p>
                   <p className="text-[11px] text-zinc-500 truncate">@{user.username}</p>
+                  <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] uppercase font-semibold tracking-wider rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    {user.role}
+                  </span>
                 </div>
 
                 <Link
@@ -210,6 +143,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
                 >
                   <Video className="w-4 h-4 text-zinc-400" />
                   Creator Studio
+                </Link>
+
+                <Link
+                  to="/settings"
+                  onClick={() => setShowUserMenu(false)}
+                  className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                >
+                  <Settings className="w-4 h-4 text-zinc-400" />
+                  Settings
                 </Link>
 
                 {isAdmin && (

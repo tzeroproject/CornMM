@@ -23,7 +23,7 @@ export interface Profile {
   website?: string;
   role: UserRole;
   is_verified: boolean;
-  is_suspended: boolean;
+  is_suspended?: boolean;
   subscriber_count: number;
   total_views: number;
   created_at: string;

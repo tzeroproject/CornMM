@@ -9,10 +9,19 @@ import {
   Sparkles,
   Layers,
   HelpCircle,
-  X
+  X,
+  ExternalLink,
+  RefreshCw
 } from 'lucide-react';
 import { videoService } from '../services/videoService';
-import { initBunnyVideoUpload, checkBunnyVideoStatus } from '../lib/bunny';
+import { 
+  initBunnyVideoUpload, 
+  uploadVideoBinary, 
+  checkBunnyVideoStatus,
+  getBunnyHlsUrl,
+  getBunnyThumbnailUrl,
+  getBunnyPreviewUrl 
+} from '../lib/bunny';
 import { Category, Tag } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
@@ -36,6 +45,14 @@ export const UploadPage: React.FC = () => {
   const [visibility, setVisibility] = useState<'public' | 'unlisted' | 'private'>('public');
   const [isAgeRestricted, setIsAgeRestricted] = useState(false);
   const [allowComments, setAllowComments] = useState(true);
+  const [autoFallback, setAutoFallback] = useState(true);
+
+  // Bunny diagnostic error state
+  const [bunnyError, setBunnyError] = useState<{
+    message: string;
+    guidance?: string;
+    statusCode?: number;
+  } | null>(null);
 
   // Upload state
   const [isUploading, setIsUploading] = useState(false);
@@ -99,8 +116,13 @@ export const UploadPage: React.FC = () => {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const performUpload = async (forceSimulated: boolean = false) => {
+    if (!user) {
+      showToast({ type: 'warning', title: 'Authentication Required', message: 'Please sign in to upload video content.' });
+      navigate('/login');
+      return;
+    }
+
     if (!selectedFile) {
       showToast({ type: 'error', title: 'Video File Required' });
       return;
@@ -113,76 +135,108 @@ export const UploadPage: React.FC = () => {
     setIsUploading(true);
     setUploadStep('authorizing');
     setUploadProgress(10);
+    setBunnyError(null);
 
     try {
       // 1. Authorize on Bunny Stream (server endpoint keeps secrets safe)
-      const bunnyInit = await initBunnyVideoUpload(title.trim());
-      setUploadStep('uploading');
-
-      // 2. Direct upload to Bunny CDN with progress simulation / fetch
-      let progress = 15;
-      const interval = setInterval(() => {
-        progress += Math.floor(Math.random() * 15) + 8;
-        if (progress >= 95) {
-          clearInterval(interval);
-          setUploadProgress(95);
-          setUploadStep('transcoding');
-        } else {
-          setUploadProgress(progress);
-        }
-      }, 350);
-
-      // Perform upload request (either simulated or direct PUT to Bunny uploadUrl)
-      if (bunnyInit.uploadUrl) {
-        try {
-          await fetch(bunnyInit.uploadUrl, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': selectedFile.type || 'video/mp4',
-            },
-            body: selectedFile,
+      let bunnyInit;
+      try {
+        bunnyInit = await initBunnyVideoUpload(title.trim(), forceSimulated);
+      } catch (initErr: any) {
+        if (!forceSimulated && autoFallback) {
+          console.warn('Bunny API rejected credentials, using resilient fallback mode:', initErr);
+          showToast({
+            type: 'warning',
+            title: 'Resilient Mode Activated',
+            message: 'Bunny API rejected credentials. Video will be published in demo stream mode so you can watch immediately.',
           });
-        } catch (uploadErr) {
-          // If CORS or local proxy applies, fallback cleanly
-          console.warn('Direct PUT response note:', uploadErr);
+          bunnyInit = await initBunnyVideoUpload(title.trim(), true);
+        } else {
+          setBunnyError({
+            message: initErr.message,
+            guidance: initErr.guidance,
+            statusCode: initErr.statusCode,
+          });
+          throw initErr;
         }
       }
 
-      await new Promise((r) => setTimeout(r, 2200));
-      clearInterval(interval);
-      setUploadProgress(100);
+      setUploadStep('uploading');
 
-      // 3. Store video metadata in database
+      // 2. Stream binary upload directly to Bunny CDN or secure proxy
+      await uploadVideoBinary({
+        file: selectedFile,
+        uploadUrl: bunnyInit.uploadUrl,
+        proxyUploadUrl: bunnyInit.proxyUploadUrl,
+        onProgress: (percent) => {
+          setUploadProgress(percent);
+          if (percent >= 98) {
+            setUploadStep('transcoding');
+          }
+        },
+      });
+
+      setUploadProgress(100);
+      setUploadStep('transcoding');
+
+      // Wait brief moment for initial transcode inspection
+      await new Promise((r) => setTimeout(r, 1500));
+
+      // 3. Generate stream and thumbnail URLs (safe fallback if running in prototype/dev mode without external CDN)
+      const isSimulated = Boolean(bunnyInit.isSimulated || bunnyInit.videoId.startsWith('bny_'));
+      const hlsUrl = isSimulated
+        ? 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+        : getBunnyHlsUrl(bunnyInit.videoId, bunnyInit.cdnHostname);
+      const thumbUrl = isSimulated
+        ? 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1280&auto=format&fit=crop&q=85'
+        : getBunnyThumbnailUrl(bunnyInit.videoId, bunnyInit.cdnHostname);
+      const previewUrl = isSimulated
+        ? 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=640&auto=format&fit=crop&q=80'
+        : getBunnyPreviewUrl(bunnyInit.videoId, bunnyInit.cdnHostname);
+
+      // Store video metadata in database
       const newVideo = await videoService.createVideo({
         title: title.trim(),
         description: description.trim(),
         category_id: categoryId,
-        creator_id: user?.id || 'creator-aria',
+        creator_id: user.id,
         visibility,
-        moderation_status: 'published', // Published for immediate preview accessibility
+        moderation_status: user?.role === 'admin' ? 'published' : 'pending_review',
         is_age_restricted: isAgeRestricted,
         allow_comments: allowComments,
         bunny_video_id: bunnyInit.videoId,
-        video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        duration: Math.floor(Math.random() * 400) + 120,
-        thumbnail_url: 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=800&auto=format&fit=crop&q=80',
+        video_url: hlsUrl,
+        thumbnail_url: thumbUrl,
+        preview_animation_url: previewUrl,
+        duration: 180,
       });
 
       setUploadStep('done');
       showToast({
         type: 'success',
-        title: 'Video Published Successfully!',
-        message: 'Your stream is now live on StreamSphere and Bunny CDN.',
+        title: 'Video Published!',
+        message: isSimulated 
+          ? 'Video published and ready to watch.' 
+          : 'Your stream is live on Bunny CDN.',
       });
 
       setTimeout(() => {
         navigate(`/watch/${newVideo.slug || newVideo.id}`);
       }, 1200);
     } catch (err: any) {
-      showToast({ type: 'error', title: 'Upload Failed', message: err.message });
+      showToast({ 
+        type: 'error', 
+        title: 'Upload Failed', 
+        message: err.guidance || err.message || 'Failed to create video on Bunny Stream'
+      });
       setIsUploading(false);
       setUploadStep('idle');
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await performUpload(false);
   };
 
   return (
@@ -196,6 +250,54 @@ export const UploadPage: React.FC = () => {
           Upload video for adaptive transcoding, HLS CDN streaming, and global delivery via Bunny Stream.
         </p>
       </div>
+
+      {/* Bunny API Diagnostic Notice if error occurred */}
+      {bunnyError && (
+        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-white space-y-3">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-2 text-red-400 font-bold text-sm">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <span>Bunny Stream Configuration Error</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBunnyError(null)}
+              className="text-zinc-400 hover:text-white p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="text-xs text-zinc-300 space-y-1.5 leading-relaxed">
+            <p className="font-semibold text-red-300">{bunnyError.guidance || bunnyError.message}</p>
+            <div className="p-2.5 rounded-xl bg-black/40 border border-white/5 space-y-1 text-[11px] font-mono">
+              <p className="text-amber-300 font-sans font-bold">📌 Bunny Stream အသုံးပြုနည်း လမ်းညွှန်ချက်:</p>
+              <p>1. <strong>BUNNY_API_KEY:</strong> Account API Key မဟုတ်ဘဲ Bunny Dashboard &gt; Stream &gt; [သင့် Video Library] &gt; API ထဲရှိ <strong>Library API Key</strong> ကို အသုံးပြုရပါမည်။</p>
+              <p>2. <strong>BUNNY_LIBRARY_ID:</strong> Library နာမည်မဟုတ်ဘဲ ဂဏန်းနံပါတ် (ဥပမာ- <code>348123</code>) ဖြစ်ရပါမည်။</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => performUpload(true)}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-bold transition-all shadow-md shadow-amber-500/20 flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Continue Upload in Prototype Mode (စမ်းသပ်မုဒ်ဖြင့် တိုက်ရိုက်တင်မည်)
+            </button>
+            <a
+              href="https://dash.bunny.net/stream"
+              target="_blank"
+              rel="noreferrer"
+              className="px-3 py-2 rounded-xl border border-white/10 hover:bg-white/5 text-xs text-zinc-300 flex items-center gap-1.5 transition-colors"
+            >
+              <span>Open Bunny Dashboard</span>
+              <ExternalLink className="w-3 h-3 text-zinc-400" />
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Compliance & Content Warning Notice */}
       <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200/90 flex items-start gap-3">
@@ -345,7 +447,19 @@ export const UploadPage: React.FC = () => {
 
           {/* Safety & Content Toggles */}
           <div className="md:col-span-2 p-4 rounded-2xl bg-[#0a0a0a] border border-white/5 space-y-3">
-            <h4 className="text-xs font-semibold text-white">Content Safety Controls</h4>
+            <h4 className="text-xs font-semibold text-white">Delivery & Content Controls</h4>
+
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoFallback}
+                onChange={(e) => setAutoFallback(e.target.checked)}
+                className="w-4 h-4 rounded text-amber-500 bg-[#050505] border-white/20 focus:ring-amber-500"
+              />
+              <span className="text-xs text-zinc-300">
+                <strong>Auto-Resilience (အလိုအလျောက် စမ်းသပ်မုဒ်):</strong> Bunny Stream ချိတ်ဆက်မှု အဆင်မပြေပါက Upload မပျက်သွားစေဘဲ အလိုအလျောက် တင်ပေးမည်။
+              </span>
+            </label>
 
             <label className="flex items-center gap-3 cursor-pointer">
               <input

@@ -66,6 +66,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
           src={video.thumbnail_url}
           alt={video.title}
           loading="lazy"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1280&auto=format&fit=crop&q=80';
+          }}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
         />
 

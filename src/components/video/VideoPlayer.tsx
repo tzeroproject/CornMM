@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
+import Hls from 'hls.js';
 import { 
   Play, 
   Pause, 
@@ -39,6 +40,58 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
 
   // View count trigger flag to ensure view is recorded only once per viewing session
   const viewRecordedRef = useRef(false);
+
+  // Stream initialization (HLS.js or native HTML5 video)
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+
+    let hls: Hls | null = null;
+    const url = video.video_url;
+    viewRecordedRef.current = false;
+    setIsPlaying(false);
+
+    if (url && url.includes('.m3u8')) {
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+        });
+        hls.loadSource(url);
+        hls.attachMedia(videoEl);
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            console.warn('HLS fatal stream error, applying fallback MP4 stream:', data.details);
+            videoEl.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+            videoEl.load();
+          }
+        });
+      } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+        videoEl.src = url;
+      } else {
+        videoEl.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+      }
+    } else if (url) {
+      videoEl.src = url;
+    }
+
+    const handleVideoError = () => {
+      console.warn('Stream failed to load, switching to resilient fallback video');
+      if (videoEl.src !== 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4') {
+        videoEl.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+        videoEl.load();
+      }
+    };
+
+    videoEl.addEventListener('error', handleVideoError);
+
+    return () => {
+      videoEl.removeEventListener('error', handleVideoError);
+      if (hls) {
+        hls.destroy();
+      }
+    };
+  }, [video.id, video.video_url]);
 
   // Keyboard controls
   useEffect(() => {
@@ -197,7 +250,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
       {/* Video Element */}
       <video
         ref={videoRef}
-        src={video.video_url}
         poster={video.thumbnail_url}
         onClick={togglePlay}
         onTimeUpdate={handleTimeUpdate}

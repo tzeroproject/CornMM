@@ -15,13 +15,13 @@ import {
   Filter
 } from 'lucide-react';
 import { adminService } from '../services/adminService';
-import { Video, Report, AuditLog } from '../types';
+import { Video, Report, AdminAction } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
 import { Link } from 'react-router-dom';
 
 export const AdminDashboardPage: React.FC = () => {
-  const { user, isAdmin, switchDemoProfile } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { showToast } = useNotification();
 
   const [activeTab, setActiveTab] = useState<'moderation' | 'reports' | 'audit'>('moderation');
@@ -34,11 +34,15 @@ export const AdminDashboardPage: React.FC = () => {
   });
   const [pendingVideos, setPendingVideos] = useState<Video[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AdminAction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function loadAdminData() {
+      if (!isAdmin) {
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
       try {
         const [st, pv, rep, logs] = await Promise.all([
@@ -62,12 +66,12 @@ export const AdminDashboardPage: React.FC = () => {
   }, [isAdmin]);
 
   const handleApproveVideo = async (videoId: string, title: string) => {
+    if (!user) return;
     try {
-      await adminService.approveVideo(videoId, user?.id || 'admin-marcus');
+      await adminService.approveVideo(videoId, user);
       setPendingVideos(pendingVideos.filter((v) => v.id !== videoId));
       setStats((s) => ({ ...s, pendingVideos: Math.max(0, s.pendingVideos - 1) }));
       showToast({ type: 'success', title: 'Video Approved', message: `"${title}" is now published.` });
-      // Refresh audit logs
       const updatedLogs = await adminService.getAuditLogs();
       setAuditLogs(updatedLogs);
     } catch (e: any) {
@@ -76,11 +80,12 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   const handleRejectVideo = async (videoId: string, title: string) => {
+    if (!user) return;
     const reason = window.prompt(`Provide reason for rejecting "${title}":`, 'Violates community guidelines / copyright clearance');
     if (!reason) return;
 
     try {
-      await adminService.rejectVideo(videoId, reason, user?.id || 'admin-marcus');
+      await adminService.rejectVideo(videoId, reason, user);
       setPendingVideos(pendingVideos.filter((v) => v.id !== videoId));
       setStats((s) => ({ ...s, pendingVideos: Math.max(0, s.pendingVideos - 1) }));
       showToast({ type: 'warning', title: 'Video Rejected', message: reason });
@@ -92,8 +97,9 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   const handleResolveReport = async (reportId: string, action: 'dismiss' | 'take_down' | 'suspend_user') => {
+    if (!user) return;
     try {
-      await adminService.resolveReport(reportId, action, user?.id || 'admin-marcus');
+      await adminService.resolveReport(reportId, action, user);
       setReports(reports.filter((r) => r.id !== reportId));
       setStats((s) => ({ ...s, reportedVideos: Math.max(0, s.reportedVideos - 1) }));
       showToast({
@@ -108,23 +114,24 @@ export const AdminDashboardPage: React.FC = () => {
     }
   };
 
-  // If user is not admin, show instant switch banner
   if (!isAdmin) {
     return (
       <div className="py-20 max-w-lg mx-auto text-center space-y-4">
         <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
           <Shield className="w-8 h-8" />
         </div>
-        <h2 className="text-xl font-bold text-white font-editorial italic">Administrator Credentials Required</h2>
+        <h2 className="text-xl font-bold text-white font-editorial italic">Administrator Access Required</h2>
         <p className="text-xs text-zinc-400 leading-relaxed">
-          The StreamSphere Admin Suite and Moderation Queue is strictly restricted to system administrators with verified RBAC clearance.
+          The StreamSphere Admin Suite and Moderation Queue is strictly restricted to platform administrators with verified RBAC privileges.
         </p>
-        <button
-          onClick={() => switchDemoProfile('admin')}
-          className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all cursor-pointer"
-        >
-          Switch to Administrator Session (Marcus Vance)
-        </button>
+        <div className="pt-2">
+          <Link
+            to="/login"
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all"
+          >
+            Sign In with Administrator Account
+          </Link>
+        </div>
       </div>
     );
   }

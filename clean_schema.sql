@@ -1,8 +1,7 @@
--- ============================================================================
+
 -- StreamSphere Video Platform - Production Supabase Migration
 -- Tables: profiles, videos, categories, tags, video_tags, likes, favorites,
 --         watch_history, comments, reports, subscriptions, notifications, admin_actions
--- ============================================================================
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -174,7 +173,7 @@ CREATE TABLE IF NOT EXISTS public.admin_actions (
 
 -- ============================================================================
 -- PERFORMANCE INDEXES (As specified in requirement #6)
--- ============================================================================
+
 CREATE INDEX IF NOT EXISTS idx_videos_created_at ON public.videos(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_videos_views ON public.videos(views DESC);
 CREATE INDEX IF NOT EXISTS idx_videos_category_id ON public.videos(category_id);
@@ -194,7 +193,7 @@ CREATE INDEX IF NOT EXISTS idx_admin_actions_created_at ON public.admin_actions(
 
 -- ============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
--- ============================================================================
+
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tags ENABLE ROW LEVEL SECURITY;
@@ -373,7 +372,7 @@ CREATE POLICY "Only admins can view audit logs"
 -- ============================================================================
 -- SECURE SERVER-SIDE VIEW COUNTER RPC
 -- (Preventing rapid duplicate client increments & direct count overwrites)
--- ============================================================================
+
 CREATE OR REPLACE FUNCTION public.increment_video_view(p_video_id UUID)
 RETURNS VOID AS $
 BEGIN
@@ -390,7 +389,7 @@ $ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ============================================================================
 -- AUTOMATIC PROFILE CREATION TRIGGER FOR SUPABASE AUTH USERS
--- ============================================================================
+
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $
 BEGIN
@@ -417,7 +416,7 @@ CREATE TRIGGER on_auth_user_created
 
 -- ============================================================================
 -- SEED DEFAULT CATEGORIES AND TAGS
--- ============================================================================
+
 INSERT INTO public.categories (name, slug, description, icon) VALUES
     ('Technology & Engineering', 'technology', 'Coding, hardware, AI systems, and tech tutorials', 'Cpu'),
     ('Cinema & Documentary', 'cinema', 'Cinematography, short films, color grading, and lens tests', 'Film'),
@@ -440,11 +439,10 @@ ON CONFLICT (slug) DO NOTHING;
 
 -- ============================================================================
 -- SEED CADMIN ADMINISTRATOR ACCOUNT
--- ============================================================================
+
 INSERT INTO public.profiles (id, username, display_name, avatar_url, role, is_verified, bio) VALUES
     ('00000000-0000-0000-0000-000000000001', 'Cadmin', 'Chief Administrator (Cadmin)', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=160&auto=format&fit=crop&q=80', 'admin', true, 'Platform System Administrator & Content Moderation Lead. Full RBAC clearance.')
 ON CONFLICT (id) DO UPDATE SET
     role = 'admin',
     is_verified = true;
-
 

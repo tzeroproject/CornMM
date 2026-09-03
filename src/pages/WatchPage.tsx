@@ -26,6 +26,35 @@ import { ReportModal } from '../components/video/ReportModal';
 import { ShareModal } from '../components/video/ShareModal';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
+import { Profile } from '../types';
+
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+const getAnonUser = (): Profile => {
+  let anonId = localStorage.getItem('streamsphere_anon_id');
+  if (!anonId) {
+    anonId = generateUUID();
+    localStorage.setItem('streamsphere_anon_id', anonId);
+  }
+  return {
+    id: anonId,
+    username: 'anonymous',
+    display_name: 'Anonymous User',
+    avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${anonId}`,
+    role: 'user',
+    is_verified: false,
+    subscriber_count: 0,
+    total_views: 0
+  };
+};
 
 export const WatchPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -83,12 +112,13 @@ export const WatchPage: React.FC = () => {
         const coms = await interactionService.getComments(found.id);
         setComments(coms);
 
-        // Fetch user interactions if logged in
-        if (user) {
+        // Fetch user interactions (logged in or anonymous)
+        const currentUser = user || getAnonUser();
+        if (currentUser) {
           const [liked, faved, subbed] = await Promise.all([
-            interactionService.isVideoLiked(user.id, found.id),
-            interactionService.isVideoFavorited(user.id, found.id),
-            interactionService.isSubscribed(user.id, found.creator_id),
+            interactionService.isVideoLiked(currentUser.id, found.id),
+            interactionService.isVideoFavorited(currentUser.id, found.id),
+            interactionService.isSubscribed(currentUser.id, found.creator_id),
           ]);
           setIsLiked(liked);
           setIsFavorited(faved);
@@ -107,31 +137,26 @@ export const WatchPage: React.FC = () => {
   }, [id, user, isAgeVerified, navigate, showToast]);
 
   const handleWatchProgress = useCallback((progress: number, dur: number) => {
-    if (user && video) {
-      interactionService.recordWatchProgress(user.id, video.id, progress, dur);
+    const currentUser = user || getAnonUser();
+    if (currentUser && video) {
+      interactionService.recordWatchProgress(currentUser.id, video.id, progress, dur);
     }
   }, [user, video]);
 
   const handleToggleLike = async () => {
-    if (!user) {
-      showToast({ type: 'warning', title: 'Sign In Required', message: 'Please sign in to like this stream.' });
-      return;
-    }
+    const currentUser = user || getAnonUser();
     if (!video) return;
 
-    const { isLiked: nextLiked, newCount } = await interactionService.toggleLike(user.id, video.id);
+    const { isLiked: nextLiked, newCount } = await interactionService.toggleLike(currentUser.id, video.id);
     setIsLiked(nextLiked);
     setLikesCount(newCount);
   };
 
   const handleToggleFavorite = async () => {
-    if (!user) {
-      showToast({ type: 'warning', title: 'Sign In Required', message: 'Please sign in to favorite this video.' });
-      return;
-    }
+    const currentUser = user || getAnonUser();
     if (!video) return;
 
-    const nextFaved = await interactionService.toggleFavorite(user.id, video.id);
+    const nextFaved = await interactionService.toggleFavorite(currentUser.id, video.id);
     setIsFavorited(nextFaved);
     showToast({
       type: 'success',
@@ -140,14 +165,11 @@ export const WatchPage: React.FC = () => {
   };
 
   const handleToggleSubscribe = async () => {
-    if (!user) {
-      showToast({ type: 'warning', title: 'Sign In Required', message: 'Please sign in to follow creators.' });
-      return;
-    }
+    const currentUser = user || getAnonUser();
     if (!video) return;
 
     const { isSubscribed: nextSub, newSubscriberCount } = await interactionService.toggleSubscription(
-      user.id,
+      currentUser.id,
       video.creator_id
     );
     setIsSubscribed(nextSub);
@@ -161,15 +183,12 @@ export const WatchPage: React.FC = () => {
 
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) {
-      showToast({ type: 'warning', title: 'Sign In Required', message: 'Sign in to join the conversation.' });
-      return;
-    }
+    const currentUser = user || getAnonUser();
     if (!video || !newCommentText.trim()) return;
 
     setIsSubmittingComment(true);
     try {
-      const added = await interactionService.addComment(video.id, user, newCommentText.trim());
+      const added = await interactionService.addComment(video.id, currentUser, newCommentText.trim());
       setComments([added, ...comments]);
       setNewCommentText('');
       showToast({ type: 'success', title: 'Comment Posted' });
@@ -329,39 +348,33 @@ export const WatchPage: React.FC = () => {
           </div>
 
           {/* New Comment Box */}
-          {user ? (
-            <form onSubmit={handleAddComment} className="flex gap-3">
-              <img
-                src={user.avatar_url}
-                alt={user.display_name}
-                className="w-9 h-9 rounded-full object-cover border border-white/10 shrink-0"
+          <form onSubmit={handleAddComment} className="flex gap-3">
+            <img
+              src={user ? user.avatar_url : getAnonUser().avatar_url}
+              alt={user ? user.display_name : getAnonUser().display_name}
+              className="w-9 h-9 rounded-full object-cover border border-white/10 shrink-0"
+            />
+            <div className="flex-1 space-y-2">
+              <textarea
+                rows={2}
+                value={newCommentText}
+                onChange={(e) => setNewCommentText(e.target.value)}
+                placeholder="Share your perspective or feedback..."
+                className="w-full bg-[#0a0a0a] border border-white/10 rounded-xl p-3 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors"
+                maxLength={1000}
               />
-              <div className="flex-1 space-y-2">
-                <textarea
-                  rows={2}
-                  value={newCommentText}
-                  onChange={(e) => setNewCommentText(e.target.value)}
-                  placeholder="Share your perspective or feedback..."
-                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-xl p-3 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-amber-500 transition-colors"
-                  maxLength={1000}
-                />
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={isSubmittingComment || !newCommentText.trim()}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold disabled:opacity-50 transition-all shadow-md shadow-amber-500/20"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    Comment
-                  </button>
-                </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  disabled={isSubmittingComment || !newCommentText.trim()}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold disabled:opacity-50 transition-all shadow-md shadow-amber-500/20"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Comment
+                </button>
               </div>
-            </form>
-          ) : (
-            <div className="p-4 rounded-xl bg-[#0a0a0a] border border-white/5 text-center text-xs text-zinc-400">
-              <Link to="/login" className="text-amber-400 font-semibold hover:underline">Sign in</Link> to participate in the conversation.
             </div>
-          )}
+          </form>
 
           {/* Comments List */}
           <div className="space-y-3 pt-2">

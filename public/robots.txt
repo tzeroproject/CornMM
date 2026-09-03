@@ -1,0 +1,22 @@
+User-agent: *
+Allow: /
+Allow: /trending
+Allow: /latest
+Allow: /categories
+Allow: /watch/
+Allow: /creator/
+Allow: /terms
+Allow: /privacy
+Allow: /dmca
+Allow: /guidelines
+Allow: /contact
+
+# Restricted administration, creator studio, and internal API routes
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /settings
+Disallow: /upload
+Disallow: /edit/
+Disallow: /api/
+
+Sitemap: /sitemap.xml
