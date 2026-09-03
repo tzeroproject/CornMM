@@ -8,7 +8,7 @@ export const CADMIN_ACCOUNT = {
   email: 'cadmin@streamsphere.tv',
   password: 'Cadmin@123',
   profile: {
-    id: 'usr_cadmin_admin_001',
+    id: '00000000-0000-0000-0000-000000000001',
     username: 'Cadmin',
     display_name: 'Chief Administrator (Cadmin)',
     avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=160&auto=format&fit=crop&q=80',

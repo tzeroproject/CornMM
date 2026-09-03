@@ -269,8 +269,13 @@ async(req,res)=>{
 
 
     uploadUrl:
-    `/api/bunny/upload/${videoId}`
+    `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${videoId}`,
 
+    proxyUploadUrl:
+    `/api/bunny/upload/${videoId}`,
+
+    cdnHostname:
+      bunny.hostname || "vz-cdn.bunnycdn.net"
 
   });
 

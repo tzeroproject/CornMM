@@ -238,14 +238,18 @@ export default {
 
         if (env.VITE_SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
           const { createClient } = await import('@supabase/supabase-js');
-          const supabaseAdmin = createClient(env.VITE_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+          const supabaseAdmin = createClient(env.VITE_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+            auth: { autoRefreshToken: false, persistSession: false }
+          });
           if (status === 4) {
             await supabaseAdmin
               .from('videos')
               .update({
-                moderation_status: 'pending_review',
-                thumbnail_url: `https://${cdnHostname}/${videoGuid}/thumbnail.jpg`,
+                processing_status: 'ready',
+                moderation_status: 'published',
                 video_url: `https://${cdnHostname}/${videoGuid}/playlist.m3u8`,
+                playback_url: `https://${cdnHostname}/${videoGuid}/playlist.m3u8`,
+                thumbnail_url: `https://${cdnHostname}/${videoGuid}/thumbnail.jpg`,
                 duration: payload.Length || 0,
                 updated_at: new Date().toISOString(),
               })
