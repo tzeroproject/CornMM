@@ -1,0 +1,6 @@
+{
+  "name": "StreamSphere Video Platform",
+  "description": "Production-ready user-generated video streaming platform powered by Supabase, Bunny Stream CDN, robust moderation, and creator workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
