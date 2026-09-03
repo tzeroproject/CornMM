@@ -46,7 +46,7 @@ export const WatchHistoryPage: React.FC = () => {
         <Clock className="w-10 h-10 text-zinc-600 mx-auto" />
         <h2 className="text-lg font-bold text-white font-editorial italic">Sign In to View Watch History</h2>
         <p className="text-xs text-zinc-400">Keep track of what you’ve watched across all your devices.</p>
-        <Link to="/login" className="inline-block px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all">
+        <Link to="/corn-admin-login" className="inline-block px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all">
           Sign In
         </Link>
       </div>

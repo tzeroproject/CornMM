@@ -31,11 +31,16 @@ export const CreatorProfilePage: React.FC = () => {
         foundProfile = user;
       } else if (isSupabaseConfigured) {
         try {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .or(`username.ilike.${username},id.eq.${username}`)
-            .maybeSingle();
+          const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(username);
+          let query = supabase.from('profiles').select('*');
+          
+          if (isUUID) {
+            query = query.or(`username.ilike.${username},id.eq.${username}`);
+          } else {
+            query = query.ilike('username', username);
+          }
+
+          const { data, error } = await query.maybeSingle();
 
           if (!error && data) {
             foundProfile = data as Profile;

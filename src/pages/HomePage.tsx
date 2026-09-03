@@ -151,7 +151,7 @@ export const HomePage: React.FC = () => {
       {/* Continue Watching (if user has active history) */}
       {continueWatching.length > 0 && selectedCategory === 'all' && (
         <section className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between px-3 sm:px-0">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
               <Clock className="w-5 h-5 text-amber-400" />
               Continue Watching
@@ -199,7 +199,7 @@ export const HomePage: React.FC = () => {
 
       {/* Trending Videos Section */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between px-3 sm:px-0">
           <div>
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
               <Flame className="w-5 h-5 text-amber-400" />
@@ -222,7 +222,7 @@ export const HomePage: React.FC = () => {
 
       {/* Popular Categories visual cards */}
       <section className="space-y-4 pt-6 border-t border-white/5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between px-3 sm:px-0">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             <Compass className="w-5 h-5 text-zinc-300" />
             Explore by Channel Category
@@ -232,7 +232,7 @@ export const HomePage: React.FC = () => {
           </Link>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 px-3 sm:px-0">
           {categories.slice(0, 6).map((cat) => (
             <button
               key={cat.id}
@@ -252,7 +252,7 @@ export const HomePage: React.FC = () => {
 
       {/* Latest Uploads Section */}
       <section className="space-y-4 pt-6 border-t border-white/5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between px-3 sm:px-0">
           <div>
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
               <Clock className="w-5 h-5 text-zinc-300" />
@@ -274,7 +274,7 @@ export const HomePage: React.FC = () => {
       </section>
 
       {/* Trust & Safety Assurance Banner */}
-      <div className="p-6 rounded-2xl bg-gradient-to-r from-[#0d0d0d] via-[#090909] to-[#050505] border border-white/5 flex flex-col md:flex-row items-center justify-between gap-6">
+      <div className="p-6 rounded-2xl bg-gradient mx-3 sm:mx-0-to-r from-[#0d0d0d] via-[#090909] to-[#050505] border border-white/5 flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
             <ShieldCheck className="w-6 h-6" />
@@ -282,7 +282,7 @@ export const HomePage: React.FC = () => {
           <div>
             <h3 className="font-semibold text-sm text-white">Lawful & Consensual Video Platform</h3>
             <p className="text-xs text-zinc-400 mt-1 max-w-xl leading-relaxed">
-              StreamSphere enforces rigorous intellectual property protections, anti-piracy controls, and zero tolerance for non-consensual imagery. All uploads undergo Bunny transcoding and moderation review.
+              cornmm enforces rigorous intellectual property protections, anti-piracy controls, and zero tolerance for non-consensual imagery. All uploads undergo Bunny transcoding and moderation review.
             </p>
           </div>
         </div>

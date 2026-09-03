@@ -128,55 +128,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {/* Legal, Policy & Safety */}
-          <div>
-            <div className="px-3 mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-              Policy & Safety
-            </div>
-            <nav className="space-y-1">
-              <NavLink to="/guidelines" className={navLinkClasses} onClick={() => onClose()}>
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                Community Guidelines
-              </NavLink>
-              <NavLink to="/dmca" className={navLinkClasses} onClick={() => onClose()}>
-                <Scale className="w-4 h-4 text-amber-400" />
-                Copyright & DMCA
-              </NavLink>
-              <NavLink to="/terms" className={navLinkClasses} onClick={() => onClose()}>
-                <FileText className="w-4 h-4" />
-                Terms of Service
-              </NavLink>
-              <NavLink to="/privacy" className={navLinkClasses} onClick={() => onClose()}>
-                <HelpCircle className="w-4 h-4" />
-                Privacy Policy
-              </NavLink>
-              <NavLink to="/contact" className={navLinkClasses} onClick={() => onClose()}>
-                <Mail className="w-4 h-4" />
-                Contact & Support
-              </NavLink>
-            </nav>
-          </div>
-        </div>
-
-        {/* Infrastructure & Status Footer */}
-        <div className="pt-4 border-t border-white/5 space-y-2">
-          <div className="p-2.5 rounded-xl bg-[#111111] border border-white/5 text-[11px] space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-400 font-medium">Video CDN</span>
-              <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> Bunny Ready
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-zinc-400 font-medium">Database</span>
-              <span className="text-amber-400 font-semibold flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> {isSupabaseConfigured ? 'Supabase' : 'Local Mock'}
-              </span>
-            </div>
-          </div>
-          <p className="text-[10px] text-zinc-500 text-center px-1">
-            StreamSphere Platform &copy; 2025. Lawful consensual user content.
-          </p>
         </div>
       </aside>
     </>

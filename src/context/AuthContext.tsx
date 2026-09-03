@@ -10,8 +10,8 @@ export const CADMIN_ACCOUNT = {
   profile: {
     id: '00000000-0000-0000-0000-000000000001',
     username: 'Cadmin',
-    display_name: 'Chief Administrator (Cadmin)',
-    avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=160&auto=format&fit=crop&q=80',
+    display_name: 'corn admin',
+    avatar_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     role: 'admin' as const,
     is_verified: true,
     is_suspended: false,
@@ -200,7 +200,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               subscriber_count: 0,
               total_views: 0,
               avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanIdentifier}`,
-              bio: 'Creator on StreamSphere',
+              bio: 'Creator on cornmm',
               created_at: new Date().toISOString(),
             };
           }
@@ -217,7 +217,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             subscriber_count: 0,
             total_views: 0,
             avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanIdentifier}`,
-            bio: 'Creator on StreamSphere',
+            bio: 'Creator on cornmm',
             created_at: new Date().toISOString(),
           };
         }
@@ -268,7 +268,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           if (data.session) {
             await fetchSupabaseProfile(data.user.id);
-            showToast({ type: 'success', title: 'Account Created', message: 'Welcome to StreamSphere!' });
+            showToast({ type: 'success', title: 'Account Created', message: 'Welcome to cornmm!' });
           } else {
             showToast({
               type: 'info',
@@ -289,7 +289,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           subscriber_count: 0,
           total_views: 0,
           avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUsername}`,
-          bio: 'Creator on StreamSphere',
+          bio: 'Creator on cornmm',
           created_at: new Date().toISOString(),
         };
 
@@ -306,7 +306,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setUser(newProfile);
         localStorage.setItem('streamsphere_production_user_v2', JSON.stringify(newProfile));
-        showToast({ type: 'success', title: 'Account Created', message: `Welcome to StreamSphere, ${cleanDisplayName}!` });
+        showToast({ type: 'success', title: 'Account Created', message: `Welcome to cornmm, ${cleanDisplayName}!` });
         return true;
       }
       return false;

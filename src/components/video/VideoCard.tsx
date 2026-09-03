@@ -59,7 +59,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
   };
 
   return (
-    <div className="group relative flex flex-col rounded-xl sm:rounded-2xl bg-[#0a0a0a] border border-white/5 hover:border-white/15 transition-all duration-300 overflow-hidden hover:shadow-xl hover:shadow-black">
+    <div className="group relative flex flex-col rounded-none sm:rounded-2xl bg-[#0a0a0a] border-y border-x-0 sm:border-x border-white/5 hover:border-white/15 transition-all duration-300 overflow-hidden hover:shadow-xl hover:shadow-black">
       {/* Thumbnail Container */}
       <Link to={`/watch/${video.slug || video.id}`} className="relative aspect-video w-full overflow-hidden bg-[#050505]">
         <img

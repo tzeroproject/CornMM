@@ -45,7 +45,7 @@ export const LoginPage: React.FC = () => {
         <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mx-auto shadow-xl shadow-black">
           <Video className="w-6 h-6" />
         </div>
-        <h1 className="text-2xl font-bold text-white font-editorial italic tracking-tight">Sign in to StreamSphere</h1>
+        <h1 className="text-2xl font-bold text-white font-editorial italic tracking-tight">Sign in to cornmm</h1>
         <p className="text-xs text-zinc-400">
           Access your creator studio, manage video uploads, or administrator dashboard.
         </p>

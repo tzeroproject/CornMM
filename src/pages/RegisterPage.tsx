@@ -26,7 +26,7 @@ export const RegisterPage: React.FC = () => {
     setIsLoading(true);
     try {
       await signUp(email, password, displayName, username);
-      showToast({ type: 'success', title: 'Account Created', message: 'Welcome to StreamSphere!' });
+      showToast({ type: 'success', title: 'Account Created', message: 'Welcome to cornmm!' });
       navigate('/dashboard');
     } catch (err: any) {
       showToast({ type: 'error', title: 'Registration Failed', message: err.message });
@@ -134,7 +134,7 @@ export const RegisterPage: React.FC = () => {
 
         <p className="text-center text-xs text-zinc-400 pt-2">
           Already have an account?{' '}
-          <Link to="/login" className="text-amber-400 font-semibold hover:underline">
+          <Link to="/corn-admin-login" className="text-amber-400 font-semibold hover:underline">
             Sign In
           </Link>
         </p>

@@ -72,7 +72,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({ video, isOpen, onClose
             </div>
             <h3 className="text-lg font-bold text-white">Report Received</h3>
             <p className="text-xs text-zinc-400 max-w-xs mx-auto">
-              Thank you for keeping StreamSphere lawful and safe. An administrator has been notified.
+              Thank you for keeping cornmm lawful and safe. An administrator has been notified.
             </p>
           </div>
         ) : (

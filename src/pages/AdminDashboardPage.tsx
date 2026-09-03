@@ -122,11 +122,11 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
         <h2 className="text-xl font-bold text-white font-editorial italic">Administrator Access Required</h2>
         <p className="text-xs text-zinc-400 leading-relaxed">
-          The StreamSphere Admin Suite and Moderation Queue is strictly restricted to platform administrators with verified RBAC privileges.
+          The cornmm Admin Suite and Moderation Queue is strictly restricted to platform administrators with verified RBAC privileges.
         </p>
         <div className="pt-2">
           <Link
-            to="/login"
+            to="/corn-admin-login"
             className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all"
           >
             Sign In with Administrator Account

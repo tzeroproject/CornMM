@@ -22,7 +22,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
 }) => {
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-5">
         {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="flex flex-col rounded-2xl bg-[#0a0a0a] border border-white/5 overflow-hidden animate-pulse">
             <div className="aspect-video w-full bg-[#141414]" />
@@ -53,7 +53,7 @@ export const VideoGrid: React.FC<VideoGridProps> = ({
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-0 sm:gap-5">
       {videos.map(video => (
         <VideoCard
           key={video.id}

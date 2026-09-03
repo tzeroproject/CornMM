@@ -106,11 +106,18 @@ export const videoService = {
   async getVideoById(id: string): Promise<Video | null> {
     requireSupabase('getVideoById');
     try {
-      const { data, error } = await supabase
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+      let query = supabase
         .from('videos')
-        .select('*, category:categories(*), creator:profiles(*)')
-        .or(`id.eq.${id},slug.eq.${id}`)
-        .single();
+        .select('*, category:categories(*), creator:profiles(*)');
+
+      if (isUUID) {
+        query = query.or(`id.eq.${id},slug.eq.${id}`);
+      } else {
+        query = query.eq('slug', id);
+      }
+
+      const { data, error } = await query.single();
       if (error) {
         handleSupabaseError(error, 'getVideoById');
         if (error.code === 'PGRST116') return null;

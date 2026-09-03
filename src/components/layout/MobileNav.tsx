@@ -37,12 +37,7 @@ export const MobileNav: React.FC = () => {
           <Heart className="w-5 h-5" />
           <span>Saved</span>
         </NavLink>
-      ) : (
-        <NavLink to="/login" className={itemClass}>
-          <User className="w-5 h-5" />
-          <span>Sign In</span>
-        </NavLink>
-      )}
+      ) : null}
 
       {isAdmin ? (
         <NavLink to="/admin" className={itemClass}>

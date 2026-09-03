@@ -39,9 +39,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
           </div>
           <div className="flex flex-col">
             <span className="font-editorial italic font-semibold text-lg tracking-wide text-white group-hover:text-amber-400 transition-colors">
-              StreamSphere
+              cornmm
             </span>
-            <span className="text-[9px] uppercase tracking-widest text-amber-500/90 font-medium -mt-1 hidden sm:inline">
+            <span className="hidden">
               CDN Edition
             </span>
           </div>
@@ -165,32 +165,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
                   </Link>
                 )}
 
-                <button
-                  onClick={() => { signOut(); setShowUserMenu(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 rounded-lg transition-colors mt-1"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Sign Out
-                </button>
               </div>
             )}
           </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <Link
-              to="/login"
-              className="px-3 py-1.5 text-xs font-medium text-zinc-300 hover:text-white transition-colors"
-            >
-              Sign In
-            </Link>
-            <Link
-              to="/register"
-              className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black transition-colors"
-            >
-              Register
-            </Link>
-          </div>
-        )}
+        ) : null}
       </div>
     </header>
   );

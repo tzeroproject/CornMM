@@ -45,7 +45,7 @@ export const App: React.FC = () => {
               <Route path="favorites" element={<FavoritesPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="admin" element={<AdminDashboardPage />} />
-              <Route path="login" element={<LoginPage />} />
+              <Route path="corn-admin-login" element={<LoginPage />} />
               <Route path="register" element={<RegisterPage />} />
               <Route path="forgot-password" element={<ForgotPasswordPage />} />
               <Route path="terms" element={<TermsPage />} />

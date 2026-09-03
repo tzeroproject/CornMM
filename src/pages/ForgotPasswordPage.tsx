@@ -27,7 +27,7 @@ export const ForgotPasswordPage: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto py-12 space-y-6">
-      <Link to="/login" className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors">
+      <Link to="/corn-admin-login" className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors">
         <ArrowLeft className="w-4 h-4" /> Back to Sign In
       </Link>
 

@@ -119,7 +119,7 @@ export const UploadPage: React.FC = () => {
   const performUpload = async (forceSimulated: boolean = false) => {
     if (!user) {
       showToast({ type: 'warning', title: 'Authentication Required', message: 'Please sign in to upload video content.' });
-      navigate('/login');
+      navigate('/corn-admin-login');
       return;
     }
 
@@ -501,7 +501,7 @@ export const UploadPage: React.FC = () => {
             disabled={isUploading || !selectedFile}
             className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold disabled:opacity-50 transition-all shadow-lg shadow-amber-500/20"
           >
-            {isUploading ? 'Publishing Video...' : 'Publish to StreamSphere'}
+            {isUploading ? 'Publishing Video...' : 'Publish to cornmm'}
           </button>
         </div>
       </form>

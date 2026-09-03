@@ -15,14 +15,14 @@ export const TermsPage: React.FC = () => (
     <section className="space-y-3">
       <h2 className="text-base font-bold text-white">1. Acceptance of Terms</h2>
       <p className="text-xs leading-relaxed text-zinc-300">
-        By accessing or uploading media to StreamSphere, you agree to be bound by these Terms of Service. If you do not agree to these terms, you must discontinue platform use immediately.
+        By accessing or uploading media to cornmm, you agree to be bound by these Terms of Service. If you do not agree to these terms, you must discontinue platform use immediately.
       </p>
     </section>
 
     <section className="space-y-3">
       <h2 className="text-base font-bold text-white">2. Creator Rights & Content Ownership</h2>
       <p className="text-xs leading-relaxed text-zinc-300">
-        Creators retain full ownership and intellectual property rights to the videos they upload. By submitting content to StreamSphere, you grant us a worldwide, non-exclusive, royalty-free license to host, transcode, cache, and distribute the media via Bunny Stream CDN solely for the purpose of platform operation.
+        Creators retain full ownership and intellectual property rights to the videos they upload. By submitting content to cornmm, you grant us a worldwide, non-exclusive, royalty-free license to host, transcode, cache, and distribute the media via Bunny Stream CDN solely for the purpose of platform operation.
       </p>
     </section>
 
@@ -36,7 +36,7 @@ export const TermsPage: React.FC = () => (
     <section className="space-y-3">
       <h2 className="text-base font-bold text-white">4. Prohibited Conduct</h2>
       <p className="text-xs leading-relaxed text-zinc-300">
-        StreamSphere strictly forbids: copyrighted piracy, non-consensual media, unauthorized scraping, hate speech, violent extremism, malicious impersonation, and fraudulent spam. Violation will result in immediate permanent account termination and referral to law enforcement where required by law.
+        cornmm strictly forbids: copyrighted piracy, non-consensual media, unauthorized scraping, hate speech, violent extremism, malicious impersonation, and fraudulent spam. Violation will result in immediate permanent account termination and referral to law enforcement where required by law.
       </p>
     </section>
   </div>
@@ -55,7 +55,7 @@ export const PrivacyPage: React.FC = () => (
     <section className="space-y-3">
       <h2 className="text-base font-bold text-white">1. Information We Collect</h2>
       <p className="text-xs leading-relaxed text-zinc-300">
-        StreamSphere collects basic profile credentials (email, handle, display name) and video metadata to power your playback and channel experience. We do not sell personal data to advertisers.
+        cornmm collects basic profile credentials (email, handle, display name) and video metadata to power your playback and channel experience. We do not sell personal data to advertisers.
       </p>
     </section>
 
@@ -101,13 +101,13 @@ export const DmcaPage: React.FC = () => {
           DMCA / Copyright Takedown Policy
         </h1>
         <p className="text-xs text-zinc-400 mt-1">
-          StreamSphere respects intellectual property rights and acts expeditiously to remove infringing material.
+          cornmm respects intellectual property rights and acts expeditiously to remove infringing material.
         </p>
       </div>
 
       <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-white/10 text-xs leading-relaxed space-y-2 text-zinc-300 shadow-md">
         <p>
-          In accordance with the Digital Millennium Copyright Act (17 U.S.C. § 512), StreamSphere has instituted a clear policy to terminate the accounts of repeat copyright infringers. If you believe your copyrighted work is being infringed on StreamSphere, please submit a formal notice below.
+          In accordance with the Digital Millennium Copyright Act (17 U.S.C. § 512), cornmm has instituted a clear policy to terminate the accounts of repeat copyright infringers. If you believe your copyrighted work is being infringed on cornmm, please submit a formal notice below.
         </p>
       </div>
 
@@ -136,7 +136,7 @@ export const DmcaPage: React.FC = () => {
           </div>
 
           <div>
-            <label className="block font-semibold text-zinc-300 mb-1">Infringing StreamSphere URL</label>
+            <label className="block font-semibold text-zinc-300 mb-1">Infringing cornmm URL</label>
             <input
               type="url"
               value={url}
@@ -197,7 +197,7 @@ export const GuidelinesPage: React.FC = () => (
       <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-white/10 space-y-1 shadow-md">
         <h3 className="font-bold text-white text-sm">1. Strict Zero-Tolerance for Stolen & Pirated Media</h3>
         <p className="text-zinc-400">
-          StreamSphere is designed for lawful, consensual, user-created streams. Do not re-upload movies, television series, sporting events, or music without explicit authorization.
+          cornmm is designed for lawful, consensual, user-created streams. Do not re-upload movies, television series, sporting events, or music without explicit authorization.
         </p>
       </div>
 
@@ -232,7 +232,7 @@ export const ContactPage: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
-    showToast({ type: 'success', title: 'Message Sent', message: 'StreamSphere Trust & Safety will respond shortly.' });
+    showToast({ type: 'success', title: 'Message Sent', message: 'cornmm Trust & Safety will respond shortly.' });
   };
 
   return (
