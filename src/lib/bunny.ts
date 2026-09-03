@@ -8,9 +8,6 @@ export interface BunnyPlayerConfig {
   autoplay?: boolean;
 }
 
-/**
- * Returns iframe player embed URL for Bunny Stream
- */
 export function getBunnyIframeUrl({
   libraryId,
   videoId,
@@ -24,25 +21,16 @@ export function getBunnyIframeUrl({
   return `https://iframe.mediadelivery.net/embed/${lib}/${videoId}?autoplay=${autoplay}&preload=true&responsive=true`;
 }
 
-/**
- * Returns direct HLS (.m3u8) stream URL for custom video players
- */
 export function getBunnyHlsUrl(videoId: string, cdnHostname?: string): string {
   const host = cdnHostname || 'vz-cdn.bunnycdn.net';
   return `https://${host}/${videoId}/playlist.m3u8`;
 }
 
-/**
- * Returns standard Bunny thumbnail image URL
- */
 export function getBunnyThumbnailUrl(videoId: string, cdnHostname?: string): string {
-  const host = cdnHostname || 'vz-cdn.bunny.net';
+  const host = cdnHostname || 'vz-cdn.bunnycdn.net';
   return `https://${host}/${videoId}/thumbnail.jpg`;
 }
 
-/**
- * Returns dynamic animated preview (WebP) for hover preview
- */
 export function getBunnyPreviewUrl(videoId: string, cdnHostname?: string): string {
   const host = cdnHostname || 'vz-cdn.bunnycdn.net';
   return `https://${host}/${videoId}/preview.webp`;
@@ -67,9 +55,7 @@ export interface BunnyUploadError extends Error {
 
 /**
  * Initialize a REAL Bunny Stream video via the backend proxy.
- *
- * `forceFallback` is intentionally ignored for compatibility with older callers.
- * CornMM must never silently switch to demo/local video data.
+ * The fallback argument is kept only for compatibility with older callers.
  */
 export async function initBunnyVideoUpload(
   title: string,
@@ -111,9 +97,6 @@ export async function initBunnyVideoUpload(
   return data as BunnyUploadInitResult;
 }
 
-/**
- * Uploads video file binary to Bunny CDN or server proxy with real progress tracking
- */
 export function uploadVideoBinary({
   file,
   uploadUrl,
@@ -126,7 +109,7 @@ export function uploadVideoBinary({
   onProgress?: (percent: number) => void;
 }): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Prefer server proxy upload to avoid browser CORS and protect secrets
+    // Prefer server proxy upload to avoid browser CORS and protect secrets.
     const targetUrl = proxyUploadUrl || uploadUrl;
     const xhr = new XMLHttpRequest();
 
@@ -156,9 +139,6 @@ export function uploadVideoBinary({
   });
 }
 
-/**
- * Check transcoding status from server
- */
 export async function checkBunnyVideoStatus(videoId: string): Promise<{
   videoId: string;
   statusCode: number;
