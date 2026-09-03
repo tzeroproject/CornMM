@@ -55,7 +55,8 @@ export interface BunnyUploadError extends Error {
 
 /**
  * Initialize a REAL Bunny Stream video via the backend proxy.
- * The fallback argument is kept only for compatibility with older callers.
+ * Demo/prototype uploads are intentionally rejected so a bad deployment
+ * can never create fake video records in Supabase.
  */
 export async function initBunnyVideoUpload(
   title: string,
@@ -63,33 +64,45 @@ export async function initBunnyVideoUpload(
 ): Promise<BunnyUploadInitResult> {
   const res = await fetch('/api/bunny/create-video', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    // Always request a real Bunny Stream video.
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'Cache-Control': 'no-cache',
+    },
     body: JSON.stringify({ title, forceFallback: false }),
+    cache: 'no-store',
   });
 
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
     const errorMsg = data.guidance
-      ? `${data.error}: ${data.guidance}`
-      : (data.error || 'Failed to initialize Bunny video upload');
+      ? `${data.error || 'Bunny Stream error'}: ${data.guidance}`
+      : (data.error || `Bunny Stream initialization failed (${res.status})`);
     const customErr = new Error(errorMsg) as BunnyUploadError;
     customErr.guidance = data.guidance;
     customErr.details = data.details;
-    customErr.statusCode = data.statusCode;
+    customErr.statusCode = data.statusCode || res.status;
     customErr.allowFallback = false;
     throw customErr;
   }
 
-  // Never accept the backend's demo/prototype response as a successful upload.
+  // Never accept a simulated response as a successful production upload.
   if (data.isSimulated || String(data.videoId || '').startsWith('bny_')) {
     const customErr = new Error(
-      'Real Bunny Stream is not configured. Demo/prototype video uploads are disabled.'
+      'The production Worker cannot access the Bunny Stream credentials.'
     ) as BunnyUploadError;
     customErr.guidance =
-      'Configure BUNNY_API_KEY, BUNNY_LIBRARY_ID, and BUNNY_CDN_HOSTNAME on the server, then try again.';
+      'Check /api/health and make sure BUNNY_API_KEY, BUNNY_LIBRARY_ID, and BUNNY_CDN_HOSTNAME are configured for the Production Worker, then Deploy the updated variables.';
     customErr.statusCode = 503;
+    customErr.allowFallback = false;
+    throw customErr;
+  }
+
+  if (!data.videoId || !data.libraryId || !data.proxyUploadUrl) {
+    const customErr = new Error('Bunny Stream returned an incomplete upload configuration.') as BunnyUploadError;
+    customErr.guidance = 'The server must return videoId, libraryId, and proxyUploadUrl before an upload can begin.';
+    customErr.statusCode = 502;
     customErr.allowFallback = false;
     throw customErr;
   }
@@ -109,12 +122,13 @@ export function uploadVideoBinary({
   onProgress?: (percent: number) => void;
 }): Promise<void> {
   return new Promise((resolve, reject) => {
-    // Prefer server proxy upload to avoid browser CORS and protect secrets.
+    // Prefer the same-origin Worker proxy so Bunny credentials never reach the browser.
     const targetUrl = proxyUploadUrl || uploadUrl;
     const xhr = new XMLHttpRequest();
 
     xhr.open('PUT', targetUrl);
     xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+    xhr.setRequestHeader('Accept', 'application/json');
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {
@@ -126,13 +140,28 @@ export function uploadVideoBinary({
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
-      } else {
-        reject(new Error(`Upload failed with status code ${xhr.status}: ${xhr.statusText}`));
+        return;
       }
+
+      let serverMessage = '';
+      try {
+        const body = JSON.parse(xhr.responseText || '{}');
+        serverMessage = body.details || body.error || '';
+      } catch {
+        serverMessage = xhr.responseText || '';
+      }
+
+      reject(
+        new Error(
+          serverMessage
+            ? `Bunny upload failed (${xhr.status}): ${serverMessage}`
+            : `Bunny upload failed with status code ${xhr.status}: ${xhr.statusText}`
+        )
+      );
     };
 
     xhr.onerror = () => {
-      reject(new Error('Network error during video upload'));
+      reject(new Error('Network error during video upload. Check the Worker/API deployment and try again.'));
     };
 
     xhr.send(file);
@@ -145,9 +174,13 @@ export async function checkBunnyVideoStatus(videoId: string): Promise<{
   statusText: string;
   encodeProgress: number;
 }> {
-  const res = await fetch(`/api/bunny/status/${videoId}`);
+  const res = await fetch(`/api/bunny/status/${encodeURIComponent(videoId)}`, {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  });
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error('Failed to query video status');
+    throw new Error(data.error || `Failed to query video status (${res.status})`);
   }
-  return await res.json();
+  return data;
 }
