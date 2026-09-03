@@ -133,36 +133,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signIn = async (identifier: string, pass: string): Promise<boolean> => {
     setIsLoading(true);
     try {
-      const cleanIdentifier = identifier.trim().toLowerCase();
+      let cleanIdentifier = identifier.trim().toLowerCase();
 
-      // Official Platform Administrator Account (Cadmin / Cadmin@123)
+      // Map 'cadmin' to the actual email for Supabase auth
       if (
         cleanIdentifier === 'cadmin' ||
         cleanIdentifier === 'cadmin@streamsphere.tv' ||
         cleanIdentifier === 'cadmin@admin.com'
       ) {
-        if (pass === CADMIN_ACCOUNT.password) {
-          setUser(CADMIN_ACCOUNT.profile);
-          localStorage.setItem('streamsphere_production_user_v2', JSON.stringify(CADMIN_ACCOUNT.profile));
-          showToast({
-            type: 'success',
-            title: 'Administrator Access Granted',
-            message: 'Signed in as Administrator Cadmin. Full moderation clearance active.',
-          });
-          return true;
-        } else {
-          showToast({
-            type: 'error',
-            title: 'Authentication Failed',
-            message: 'Incorrect password for administrator account Cadmin.',
-          });
-          return false;
+        cleanIdentifier = 'cadmin@streamsphere.tv';
+        // If Supabase is NOT configured, allow bypass. Otherwise, fall through to Supabase auth
+        if (!isSupabaseConfigured) {
+          if (pass === CADMIN_ACCOUNT.password) {
+            setUser(CADMIN_ACCOUNT.profile);
+            localStorage.setItem('streamsphere_production_user_v2', JSON.stringify(CADMIN_ACCOUNT.profile));
+            showToast({
+              type: 'success',
+              title: 'Administrator Access Granted',
+              message: 'Signed in as Administrator Cadmin. Full moderation clearance active.',
+            });
+            return true;
+          } else {
+            showToast({ type: 'error', title: 'Authentication Failed', message: 'Incorrect password.' });
+            return false;
+          }
         }
       }
 
       if (isSupabaseConfigured) {
         const { data, error } = await supabase.auth.signInWithPassword({
-          email: identifier.trim(),
+          email: cleanIdentifier,
           password: pass,
         });
         if (error) throw error;

@@ -241,8 +241,10 @@ export default {
           const supabaseAdmin = createClient(env.VITE_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
             auth: { autoRefreshToken: false, persistSession: false }
           });
+          
           if (status === 4) {
-            await supabaseAdmin
+            // First try to update
+            const { data: updated } = await supabaseAdmin
               .from('videos')
               .update({
                 processing_status: 'ready',
@@ -253,7 +255,32 @@ export default {
                 duration: payload.Length || 0,
                 updated_at: new Date().toISOString(),
               })
-              .eq('bunny_video_id', videoGuid);
+              .eq('bunny_video_id', videoGuid)
+              .select('id');
+
+            // If nothing updated, this video was uploaded directly to Bunny Dashboard
+            if (!updated || updated.length === 0) {
+              let cadminId = null;
+              const { data: profiles } = await supabaseAdmin.from('profiles').select('id').eq('role', 'admin').limit(1);
+              if (profiles && profiles.length > 0) cadminId = profiles[0].id;
+              
+              if (cadminId) {
+                await supabaseAdmin.from('videos').insert({
+                   bunny_video_id: videoGuid,
+                   title: payload.Title || 'Bunny Direct Upload',
+                   slug: `${videoGuid}-${Date.now()}`,
+                   description: 'Automatically imported from Bunny Stream Dashboard.',
+                   creator_id: cadminId,
+                   visibility: 'public',
+                   moderation_status: 'published',
+                   processing_status: 'ready',
+                   video_url: `https://${cdnHostname}/${videoGuid}/playlist.m3u8`,
+                   playback_url: `https://${cdnHostname}/${videoGuid}/playlist.m3u8`,
+                   thumbnail_url: `https://${cdnHostname}/${videoGuid}/thumbnail.jpg`,
+                   duration: payload.Length || 0,
+                });
+              }
+            }
           } else if (status === 5 || status === 6) {
             await supabaseAdmin
               .from('videos')
