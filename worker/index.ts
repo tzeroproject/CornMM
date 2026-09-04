@@ -300,162 +300,55 @@ export default {
       }
 
       // ---------------------------------------------------------------
-      // 1b. UQLOAD UPLOAD PROXY
-      // The Uqload API key stays server-side. The browser sends the raw
-      // video to this Worker, which looks up the upload server and forwards
-      // the file as multipart/form-data to Uqload.
+      // 1b. UQLOAD REMOTE-URL UPLOAD
+      // Video bytes are uploaded directly from the browser to Supabase
+      // Storage. This endpoint only asks Uqload to fetch that public URL.
       // ---------------------------------------------------------------
-      if (pathname === '/api/uqload/upload' && method === 'POST') {
+      if (pathname === '/api/uqload/upload-url' && method === 'POST') {
         const uqloadKey = clean(env.UQLOAD_API_KEY);
         if (!uqloadKey) {
-          return json(
-            { error: 'Uqload is not configured (UQLOAD_API_KEY missing).' },
-            { status: 500 }
-          );
+          return json({ error: 'Uqload is not configured (UQLOAD_API_KEY missing).' }, { status: 500 });
         }
 
-        const title = url.searchParams.get('title') || 'Untitled Video';
-
-        const serverRes = await fetch(
-          `https://uqload.vc/api/upload/server?key=${encodeURIComponent(uqloadKey)}`
-        );
-
-        if (!serverRes.ok) {
-          const details = await serverRes.text();
-          return json(
-            { error: `Uqload server lookup failed (${serverRes.status})`, details },
-            { status: 502 }
-          );
+        let body: any;
+        try {
+          body = await request.json();
+        } catch {
+          return json({ error: 'Invalid JSON body.' }, { status: 400 });
         }
 
-        const serverData = (await serverRes.json()) as any;
-        if (serverData.status !== 200 || !serverData.result) {
-          return json(
-            { error: serverData.msg || 'Uqload did not return an upload server' },
-            { status: 502 }
-          );
+        const videoUrl = typeof body?.videoUrl === 'string' ? body.videoUrl.trim() : '';
+        const title = typeof body?.title === 'string' ? body.title.trim() : 'Untitled Video';
+
+        if (!videoUrl || !/^https:\/\//i.test(videoUrl)) {
+          return json({ error: 'A public HTTPS videoUrl is required.' }, { status: 400 });
         }
 
-        const fileBuffer = await request.arrayBuffer();
-        const contentType = request.headers.get('content-type') || 'video/mp4';
+        const apiUrl =
+          `https://uqload.vc/api/upload/url?key=${encodeURIComponent(uqloadKey)}&url=${encodeURIComponent(videoUrl)}&file_public=1`;
 
-        const form = new FormData();
-        form.append('key', uqloadKey);
-        form.append('file_title', title);
-        form.append('html_redirect', '0');
-        form.append(
-          'file',
-          new Blob([fileBuffer], { type: contentType }),
-          'upload.mp4'
-        );
+        const uqloadRes = await fetch(apiUrl);
+        const textBody = await uqloadRes.text();
 
-        const uploadRes = await fetch(serverData.result as string, {
-          method: 'POST',
-          body: form,
-        });
-
-        if (!uploadRes.ok) {
-          const details = await uploadRes.text();
-          return json(
-            { error: `Uqload upload failed (${uploadRes.status})`, details },
-            { status: 502 }
-          );
+        let data: any;
+        try {
+          data = JSON.parse(textBody);
+        } catch {
+          return json({ error: 'Invalid response from Uqload.' }, { status: 502 });
         }
 
-        const uploadData = (await uploadRes.json()) as any;
-        const fileEntry = uploadData?.files?.[0];
-
-        if (!fileEntry || fileEntry.status !== 'OK' || !fileEntry.filecode) {
+        if (!uqloadRes.ok || data.status !== 200 || !data.result?.filecode) {
           return json(
-            {
-              error: 'Uqload returned an unexpected upload response',
-              details: JSON.stringify(uploadData),
-            },
+            { error: data.msg || `Uqload URL upload failed (${uqloadRes.status})` },
             { status: 502 }
           );
         }
 
         return json({
           success: true,
-          fileCode: fileEntry.filecode,
-          embedUrl: `https://uqload.vc/e/${fileEntry.filecode}`,
-        });
-      }
-
-      // ---------------------------------------------------------------
-      // 1b. LULUSTREAM — SECONDARY / BACKUP UPLOAD HOST
-      // Receives the raw file bytes from the browser (same pattern as the
-      // Bunny proxy above), then repackages them as multipart/form-data
-      // server-side to call LuluStream's API. LULU_API_KEY never reaches
-      // the browser. Used automatically when Bunny Stream fails, and can
-      // also be called directly for a manual Lulu upload.
-      // ---------------------------------------------------------------
-      if (pathname === '/api/lulu/upload' && method === 'PUT') {
-        const luluKey = clean(env.LULU_API_KEY);
-        if (!luluKey) {
-          return json(
-            { error: 'LuluStream backup is not configured (LULU_API_KEY missing).' },
-            { status: 500 }
-          );
-        }
-
-        const title = url.searchParams.get('title') || 'Untitled Video';
-
-        // 1. Ask LuluStream which upload server to use for this key.
-        const serverRes = await fetch(
-          `https://lulustream.com/api/upload/server?key=${encodeURIComponent(luluKey)}`
-        );
-        if (!serverRes.ok) {
-          return json(
-            { error: `LuluStream server lookup failed (${serverRes.status})` },
-            { status: 502 }
-          );
-        }
-        const serverData = (await serverRes.json()) as any;
-        if (serverData.status !== 200 || !serverData.result) {
-          return json(
-            { error: serverData.msg || 'LuluStream did not return an upload server' },
-            { status: 502 }
-          );
-        }
-        const uploadServerUrl = serverData.result as string;
-
-        // 2. Buffer the incoming file and repackage as multipart/form-data —
-        // LuluStream's upload endpoint requires a real multipart body.
-        const fileBuffer = await request.arrayBuffer();
-        const contentType = request.headers.get('content-type') || 'video/mp4';
-
-        const form = new FormData();
-        form.append('key', luluKey);
-        form.append('file_title', title);
-        form.append('html_redirect', '0');
-        form.append('file', new Blob([fileBuffer], { type: contentType }), 'upload.mp4');
-
-        const uploadRes = await fetch(uploadServerUrl, { method: 'POST', body: form });
-        if (!uploadRes.ok) {
-          const details = await uploadRes.text();
-          return json(
-            { error: `LuluStream upload failed (${uploadRes.status})`, details },
-            { status: 502 }
-          );
-        }
-
-        const uploadData = (await uploadRes.json()) as any;
-        const fileEntry = uploadData?.files?.[0];
-        if (!fileEntry || fileEntry.status !== 'OK' || !fileEntry.filecode) {
-          return json(
-            {
-              error: 'LuluStream returned an unexpected upload response',
-              details: JSON.stringify(uploadData),
-            },
-            { status: 502 }
-          );
-        }
-
-        return json({
-          success: true,
-          fileCode: fileEntry.filecode,
-          embedUrl: `https://lulustream.com/e/${fileEntry.filecode}`,
+          fileCode: data.result.filecode,
+          embedUrl: `https://uqload.vc/e/${data.result.filecode}`,
+          title,
         });
       }
 
