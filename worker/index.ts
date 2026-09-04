@@ -20,6 +20,7 @@ export interface Env {
   BUNNY_CDN_HOSTNAME?: string;
   BUNNY_WEBHOOK_KEY?: string;
   LULU_API_KEY?: string;
+  UQLOAD_API_KEY?: string;
   ASSETS: Fetcher;
 }
 
@@ -296,6 +297,89 @@ export default {
         }
 
         return json({ success: true, received: true, videoGuid, status });
+      }
+
+      // ---------------------------------------------------------------
+      // 1b. UQLOAD UPLOAD PROXY
+      // The Uqload API key stays server-side. The browser sends the raw
+      // video to this Worker, which looks up the upload server and forwards
+      // the file as multipart/form-data to Uqload.
+      // ---------------------------------------------------------------
+      if (pathname === '/api/uqload/upload' && method === 'POST') {
+        const uqloadKey = clean(env.UQLOAD_API_KEY);
+        if (!uqloadKey) {
+          return json(
+            { error: 'Uqload is not configured (UQLOAD_API_KEY missing).' },
+            { status: 500 }
+          );
+        }
+
+        const title = url.searchParams.get('title') || 'Untitled Video';
+
+        const serverRes = await fetch(
+          `https://uqload.vc/api/upload/server?key=${encodeURIComponent(uqloadKey)}`
+        );
+
+        if (!serverRes.ok) {
+          const details = await serverRes.text();
+          return json(
+            { error: `Uqload server lookup failed (${serverRes.status})`, details },
+            { status: 502 }
+          );
+        }
+
+        const serverData = (await serverRes.json()) as any;
+        if (serverData.status !== 200 || !serverData.result) {
+          return json(
+            { error: serverData.msg || 'Uqload did not return an upload server' },
+            { status: 502 }
+          );
+        }
+
+        const fileBuffer = await request.arrayBuffer();
+        const contentType = request.headers.get('content-type') || 'video/mp4';
+
+        const form = new FormData();
+        form.append('key', uqloadKey);
+        form.append('file_title', title);
+        form.append('html_redirect', '0');
+        form.append(
+          'file',
+          new Blob([fileBuffer], { type: contentType }),
+          'upload.mp4'
+        );
+
+        const uploadRes = await fetch(serverData.result as string, {
+          method: 'POST',
+          body: form,
+        });
+
+        if (!uploadRes.ok) {
+          const details = await uploadRes.text();
+          return json(
+            { error: `Uqload upload failed (${uploadRes.status})`, details },
+            { status: 502 }
+          );
+        }
+
+        const uploadData = (await uploadRes.json()) as any;
+        const fileEntry = uploadData?.files?.[0];
+
+        if (!fileEntry || fileEntry.status !== 'OK' || !fileEntry.filecode) {
+          return json(
+            {
+              error: 'Uqload returned an unexpected upload response',
+              details: JSON.stringify(uploadData),
+            },
+            { status: 502 }
+          );
+        }
+
+        return json({
+          success: true,
+          fileCode: fileEntry.filecode,
+          embedUrl: `https://uqload.vc/e/${fileEntry.filecode}`,
+        });
       }
 
       // ---------------------------------------------------------------
