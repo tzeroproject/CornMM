@@ -300,6 +300,20 @@ export default {
       }
 
       // ---------------------------------------------------------------
+      // 1a. UQLOAD DIRECT UPLOAD SERVER
+      // Browser uploads the video bytes directly to Uqload.
+      // ---------------------------------------------------------------
+      if (pathname === '/api/uqload/upload-server' && method === 'GET') {
+        const uqloadKey = clean(env.UQLOAD_API_KEY);
+        if (!uqloadKey) return json({ error: 'Uqload is not configured (UQLOAD_API_KEY missing).' }, { status: 500 });
+        const response = await fetch(`https://uqload.vc/api/upload/server?key=${encodeURIComponent(uqloadKey)}`);
+        const data = await response.json() as any;
+        if (!response.ok || data.status !== 200 || !data.result) {
+          return json({ error: data.msg || 'Failed to get Uqload upload server.' }, { status: 502 });
+        }
+        return json({ uploadUrl: data.result, apiKey: uqloadKey });
+      }
+      // ---------------------------------------------------------------
       // 1b. UQLOAD REMOTE-URL UPLOAD
       // Video bytes are uploaded directly from the browser to Supabase
       // Storage. This endpoint only asks Uqload to fetch that public URL.
