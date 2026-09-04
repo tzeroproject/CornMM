@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { 
+import { RefreshCw, 
   Shield, 
   AlertTriangle, 
   CheckCircle, 
@@ -36,6 +36,32 @@ export const AdminDashboardPage: React.FC = () => {
   const [reports, setReports] = useState<Report[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
+  
+  const handleSyncBunny = async () => {
+    if (!user) return;
+    setIsSyncing(true);
+    try {
+      const res = await adminService.syncBunnyVideos(user);
+      showToast({ type: 'success', title: 'Sync Complete', message: `Successfully synced ${res.syncedCount} new videos from Bunny (${res.totalBunnyVideos} total).` });
+      // Reload stats
+      const [st, pv, rep, al] = await Promise.all([
+        adminService.getStats(),
+        adminService.getPendingVideos(),
+        adminService.getReportedContent(),
+        adminService.getAuditLogs(),
+      ]);
+      setStats(st);
+      setPendingVideos(pv);
+      setReports(rep);
+      setAuditLogs(al);
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Sync Failed', message: err.message });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
 
   useEffect(() => {
     async function loadAdminData() {
@@ -150,7 +176,16 @@ export const AdminDashboardPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col items-end gap-2">
+          <button
+            onClick={handleSyncBunny}
+            disabled={isSyncing}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono font-semibold hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+            {isSyncing ? 'Syncing...' : 'Sync Bunny Videos'}
+          </button>
+
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono font-semibold">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             Active Moderator: {user?.display_name}

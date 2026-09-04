@@ -35,6 +35,8 @@ export const UploadPage: React.FC = () => {
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadMode, setUploadMode] = useState<"bunny" | "lulu" | "good">("bunny");
+  const [embedUrl, setEmbedUrl] = useState("");
   const [isDragging, setIsDragging] = useState(false);
 
   // Form Fields
@@ -123,12 +125,23 @@ export const UploadPage: React.FC = () => {
       return;
     }
 
-    if (!selectedFile) {
+    if (!title.trim()) {
+      showToast({ type: 'error', title: 'Title Required' });
+      return;
+    }
+
+    if (uploadMode === 'bunny' && !selectedFile) {
       showToast({ type: 'error', title: 'Video File Required' });
       return;
     }
-    if (!title.trim()) {
-      showToast({ type: 'error', title: 'Title Required' });
+    
+    if (uploadMode === 'lulu' && !selectedFile) {
+      showToast({ type: 'error', title: 'Video File Required for Lulu Stream' });
+      return;
+    }
+
+    if (uploadMode === 'good' && !embedUrl.trim()) {
+      showToast({ type: 'error', title: 'Embed URL Required' });
       return;
     }
 
@@ -138,6 +151,109 @@ export const UploadPage: React.FC = () => {
     setBunnyError(null);
 
     try {
+      if (uploadMode === 'good') {
+        setUploadStep('done');
+        let finalEmbedUrl = embedUrl;
+        const srcMatch = embedUrl.match(/src\s*=\s*["'](.*?)["']/i);
+        if (srcMatch && srcMatch[1]) {
+          finalEmbedUrl = srcMatch[1];
+        }
+
+        const newVideo = await videoService.createVideo({
+          title: title.trim(),
+          description: description.trim(),
+          category_id: categoryId,
+          creator_id: user.id,
+          visibility,
+          moderation_status: 'published',
+          is_age_restricted: isAgeRestricted,
+          allow_comments: allowComments,
+          bunny_video_id: 'embed',
+          video_url: finalEmbedUrl,
+          thumbnail_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
+          preview_animation_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
+          duration: 0,
+        });
+        
+        showToast({ type: 'success', title: 'Embed Successful', message: 'Your video embed was published.' });
+        setTimeout(() => {
+          navigate(`/watch/${newVideo.slug || newVideo.id}`);
+        }, 1200);
+        return;
+      }
+
+      if (uploadMode === 'lulu' && selectedFile) {
+        setUploadStep('authorizing');
+        const res = await fetch('/api/lulu/upload-server');
+        if (!res.ok) throw new Error('Failed to fetch Lulu configuration');
+        const config = await res.json();
+        if (config.error) throw new Error(config.error);
+        
+        setUploadStep('uploading');
+        setUploadProgress(10);
+        
+        const formData = new FormData();
+        formData.append('key', config.apiKey);
+        formData.append('file', selectedFile);
+        formData.append('file_title', title.trim());
+        formData.append('html_redirect', '0');
+        
+        const result = await new Promise((resolve, reject) => {
+           const xhr = new XMLHttpRequest();
+           xhr.open('POST', config.uploadUrl);
+           xhr.upload.onprogress = (e) => {
+             if (e.lengthComputable) {
+               const p = Math.round((e.loaded / e.total) * 90);
+               setUploadProgress(10 + p);
+             }
+           };
+           xhr.onload = () => {
+             if (xhr.status === 200) {
+               try {
+                 resolve(JSON.parse(xhr.responseText));
+               } catch (err) {
+                 reject(new Error('Invalid JSON from Lulu'));
+               }
+             } else {
+               reject(new Error('Lulu upload failed with status ' + xhr.status));
+             }
+           };
+           xhr.onerror = () => reject(new Error('Lulu upload network error'));
+           xhr.send(formData);
+        });
+        
+        if (!result || !result.files || !result.files[0] || !result.files[0].filecode) {
+           throw new Error('Lulu upload failed or returned invalid format');
+        }
+        
+        const filecode = result.files[0].filecode;
+        const finalEmbedUrl = `https://lulustream.com/e/${filecode}`;
+        
+        setUploadStep('done');
+        
+        const newVideo = await videoService.createVideo({
+          title: title.trim(),
+          description: description.trim(),
+          category_id: categoryId,
+          creator_id: user.id,
+          visibility,
+          moderation_status: 'published',
+          is_age_restricted: isAgeRestricted,
+          allow_comments: allowComments,
+          bunny_video_id: 'embed',
+          video_url: finalEmbedUrl,
+          thumbnail_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
+          preview_animation_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
+          duration: 0,
+        });
+        
+        showToast({ type: 'success', title: 'Upload Successful', message: 'Your video is now on Lulu Stream.' });
+        setTimeout(() => {
+          navigate(`/watch/${newVideo.slug || newVideo.id}`);
+        }, 1200);
+        return;
+      }
+
       // 1. Authorize on Bunny Stream (server endpoint keeps secrets safe)
       let bunnyInit;
       try {
@@ -165,7 +281,7 @@ export const UploadPage: React.FC = () => {
 
       // 2. Stream binary upload directly to Bunny CDN or secure proxy
       await uploadVideoBinary({
-        file: selectedFile,
+        file: selectedFile as File,
         uploadUrl: bunnyInit.uploadUrl,
         proxyUploadUrl: bunnyInit.proxyUploadUrl,
         onProgress: (percent) => {
@@ -182,7 +298,7 @@ export const UploadPage: React.FC = () => {
       // Wait brief moment for initial transcode inspection
       await new Promise((r) => setTimeout(r, 1500));
 
-      // 3. Generate stream and thumbnail URLs (safe fallback if running in prototype/dev mode without external CDN)
+      // 3. Generate stream and thumbnail URLs
       const isSimulated = Boolean(bunnyInit.isSimulated || bunnyInit.videoId.startsWith('bny_'));
       const hlsUrl = isSimulated
         ? 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
@@ -201,7 +317,7 @@ export const UploadPage: React.FC = () => {
         category_id: categoryId,
         creator_id: user.id,
         visibility,
-        moderation_status: user?.role === 'admin' ? 'published' : 'pending_review',
+        moderation_status: 'published',
         is_age_restricted: isAgeRestricted,
         allow_comments: allowComments,
         bunny_video_id: bunnyInit.videoId,
@@ -219,15 +335,15 @@ export const UploadPage: React.FC = () => {
           ? 'Video published and ready to watch.' 
           : 'Your stream is live on Bunny CDN.',
       });
-
       setTimeout(() => {
         navigate(`/watch/${newVideo.slug || newVideo.id}`);
       }, 1200);
+
     } catch (err: any) {
       showToast({ 
-        type: 'error', 
-        title: 'Upload Failed', 
-        message: err.guidance || err.message || 'Failed to create video on Bunny Stream'
+         type: 'error', 
+         title: 'Upload Failed', 
+         message: err.guidance || err.message || 'Failed to create video.'
       });
       setIsUploading(false);
       setUploadStep('idle');
@@ -310,61 +426,101 @@ export const UploadPage: React.FC = () => {
         </div>
       </div>
 
+      
+      {/* Upload Mode Switcher */}
+      <div className="flex bg-[#0a0a0a] border border-white/10 rounded-xl p-1 mb-6">
+        <button
+          type="button"
+          onClick={() => setUploadMode('bunny')}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${uploadMode === 'bunny' ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-400 hover:text-white'}`}
+        >
+          Bunny Stream
+        </button>
+        <button
+          type="button"
+          onClick={() => setUploadMode('lulu')}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${uploadMode === 'lulu' ? 'bg-emerald-500/20 text-emerald-400' : 'text-zinc-400 hover:text-white'}`}
+        >
+          Lulu Stream
+        </button>
+        <button
+          type="button"
+          onClick={() => setUploadMode('good')}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${uploadMode === 'good' ? 'bg-blue-500/20 text-blue-400' : 'text-zinc-400 hover:text-white'}`}
+        >
+          Good Stream
+        </button>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Drag & Drop File Zone */}
-        {!selectedFile ? (
-          <div
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border border-dashed rounded-3xl p-10 text-center cursor-pointer transition-all ${
-              isDragging
-                ? 'border-amber-400 bg-amber-500/10'
-                : 'border-white/10 hover:border-white/20 bg-[#0a0a0a] hover:bg-[#0e0e0e]'
-            }`}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
-              onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])}
-              className="hidden"
-            />
-            <div className="w-16 h-16 rounded-2xl bg-[#141414] border border-white/10 text-amber-400 flex items-center justify-center mx-auto mb-4">
-              <Upload className="w-8 h-8" />
+
+        {/* Upload Mode conditional rendering */}
+        {uploadMode === 'bunny' || uploadMode === 'lulu' ? (
+          !selectedFile ? (
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`border border-dashed rounded-3xl p-10 text-center cursor-pointer transition-all ${
+                isDragging
+                  ? 'border-amber-400 bg-amber-500/10'
+                  : 'border-white/10 hover:border-white/20 bg-[#0a0a0a] hover:bg-[#0e0e0e]'
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
+                onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])}
+                className="hidden"
+              />
+              <div className="w-16 h-16 rounded-2xl bg-[#141414] border border-white/10 text-amber-400 flex items-center justify-center mx-auto mb-4">
+                <Upload className="w-8 h-8" />
+              </div>
+              <h3 className="font-bold text-base text-white">Select or Drag video file here</h3>
+              <p className="text-xs text-zinc-400 mt-1">
+                Supports MP4, WebM, MOV, or MKV up to 1GB
+              </p>
+              <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#161616] border border-white/10 text-[11px] font-mono text-zinc-300">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                Auto-transcoded to 1080p, 720p & 480p HLS
+              </div>
             </div>
-            <h3 className="font-bold text-base text-white">Select or Drag video file here</h3>
-            <p className="text-xs text-zinc-400 mt-1">
-              Supports MP4, WebM, MOV, or MKV up to 1GB
-            </p>
-            <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#161616] border border-white/10 text-[11px] font-mono text-zinc-300">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              Auto-transcoded to 1080p, 720p & 480p HLS
+          ) : (
+            <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-white/10 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center">
+                  <FileVideo className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-zinc-200">{selectedFile.name}</p>
+                  <p className="text-[10px] text-zinc-500">
+                    {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB • Ready for Bunny upload
+                  </p>
+                </div>
+              </div>
+              {!isUploading && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedFile(null)}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
-          </div>
+          )
         ) : (
-          <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-white/10 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center">
-                <FileVideo className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs font-semibold text-zinc-200">{selectedFile.name}</p>
-                <p className="text-[10px] text-zinc-500">
-                  {(selectedFile.size / (1024 * 1024)).toFixed(1)} MB • Ready for Bunny upload
-                </p>
-              </div>
-            </div>
-            {!isUploading && (
-              <button
-                type="button"
-                onClick={() => setSelectedFile(null)}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
+          <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4">
+            <label className="block text-sm font-bold text-white uppercase tracking-wider mb-2">Good Stream Embed Code or URL</label>
+            <textarea
+              value={embedUrl}
+              onChange={(e) => setEmbedUrl(e.target.value)}
+              placeholder={'<iframe src="https://goodstream.com/embed/..." ...></iframe>'}
+              className="w-full h-32 px-4 py-3 rounded-xl bg-black border border-white/10 text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+            />
+            <p className="text-xs text-zinc-400">Paste an iframe code or direct embed URL from a third-party streaming site.</p>
           </div>
         )}
 
@@ -498,7 +654,7 @@ export const UploadPage: React.FC = () => {
           </button>
           <button
             type="submit"
-            disabled={isUploading || !selectedFile}
+            disabled={isUploading || ((uploadMode === "bunny" || uploadMode === "lulu") && !selectedFile) || (uploadMode === "good" && !embedUrl)}
             className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold disabled:opacity-50 transition-all shadow-lg shadow-amber-500/20"
           >
             {isUploading ? 'Publishing Video...' : 'Publish to cornmm'}

@@ -34,6 +34,33 @@ function saveLocalAuditLogs(logs: AdminAction[]) {
 }
 
 export const adminService = {
+  
+  async syncBunnyVideos(adminProfileOrId: Profile | string): Promise<{ syncedCount: number, totalBunnyVideos: number }> {
+    try {
+      const res = await fetch('/api/admin/sync-bunny', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to sync from Bunny');
+      
+      const adminId = typeof adminProfileOrId === 'string' ? adminProfileOrId : adminProfileOrId.id;
+      await this.logAction({
+        adminId,
+        action: 'bunny_sync',
+        targetType: 'system',
+        targetId: 'bunny_sync',
+        targetName: 'Bunny CDN Sync',
+        details: { syncedCount: data.syncedCount, totalBunnyVideos: data.totalBunnyVideos },
+      });
+      
+      return data;
+    } catch (err: any) {
+      console.error('Error syncing bunny videos:', err);
+      throw err;
+    }
+  },
+
   async getStats(): Promise<AdminStats> {
     let totalUsers = 0;
     let totalVideos = 0;
