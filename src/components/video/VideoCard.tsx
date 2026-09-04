@@ -69,7 +69,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
           onError={(e) => {
             (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1280&auto=format&fit=crop&q=80';
           }}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          className="w-full h-full object-cover scale-110 blur-xl group-hover:scale-105 group-hover:blur-0 transition-all duration-500"
         />
 
         {/* Duration Badge */}

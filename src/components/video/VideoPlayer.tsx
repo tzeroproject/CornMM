@@ -27,6 +27,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [hasStarted, setHasStarted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(video.duration || 0);
   const [volume, setVolume] = useState(0.9);
@@ -123,7 +124,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
   const togglePlay = () => {
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
-      videoRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      videoRef.current.play().then(() => { setIsPlaying(true); setHasStarted(true); }).catch(() => {});
     } else {
       videoRef.current.pause();
       setIsPlaying(false);
@@ -218,7 +219,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
   
   const isExternalEmbed = video.video_url && !video.video_url.includes('.m3u8') && (video.video_url.includes('http') || video.video_url.startsWith('//')) && (!video.bunny_video_id || video.bunny_video_id === 'embed');
 
-  if (isExternalEmbed) {
+    if (isExternalEmbed) {
     // Attempt to extract src if the user pasted a full iframe tag
     let embedSrc = video.video_url;
     const srcMatch = video.video_url.match(/src\s*=\s*["'](.*?)["']/i);
@@ -228,42 +229,60 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
 
     return (
       <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black shadow-2xl border border-white/10">
+        {!hasStarted && (
+          <div 
+            className="absolute inset-0 z-10 flex items-center justify-center cursor-pointer overflow-hidden"
+            onClick={() => setHasStarted(true)}
+          >
+            <img src={video.thumbnail_url} alt="" className="absolute inset-0 w-full h-full object-cover blur-2xl scale-110" />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-md" />
+            <div className="z-20 w-16 h-16 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-amber-500 hover:text-black hover:border-transparent transition-all duration-300">
+              <Play className="w-8 h-8 fill-current ml-1" />
+            </div>
+          </div>
+        )}
         <iframe
           src={embedSrc}
           loading="lazy"
           className="w-full h-full border-0"
-          allow="accelerometer;gyroscope;autoplay;encrypted-media;picture-in-picture;"
           allowFullScreen
-          title={video.title}
-        />
+          allow="autoplay; fullscreen; picture-in-picture"
+        ></iframe>
       </div>
     );
   }
 
   // If user chooses Bunny Direct Iframe Player Mode
 
-  if (useBunnyIframeEmbed && video.bunny_video_id) {
+    if (useBunnyIframeEmbed && video.bunny_video_id) {
     const iframeSrc = getBunnyIframeUrl({
       videoId: video.bunny_video_id,
-      autoplay: true,
+      autoplay: hasStarted,
     });
 
     return (
       <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black shadow-2xl border border-white/10">
-        <iframe
-          src={iframeSrc}
-          loading="lazy"
-          className="w-full h-full border-0"
-          allow="accelerometer;gyroscope;autoplay;encrypted-media;picture-in-picture;"
-          allowFullScreen
-          title={video.title}
-        />
-        <button
-          onClick={() => setUseBunnyIframeEmbed(false)}
-          className="absolute top-3 right-3 px-3 py-1.5 rounded-lg bg-[#111]/90 text-xs text-zinc-300 hover:text-white border border-white/10 shadow-md backdrop-blur-md"
-        >
-          Switch to Custom Player
-        </button>
+        {!hasStarted && (
+          <div 
+            className="absolute inset-0 z-10 flex items-center justify-center cursor-pointer overflow-hidden"
+            onClick={() => setHasStarted(true)}
+          >
+            <img src={video.thumbnail_url} alt="" className="absolute inset-0 w-full h-full object-cover blur-2xl scale-110" />
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-md" />
+            <div className="z-20 w-16 h-16 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-amber-500 hover:text-black hover:border-transparent transition-all duration-300">
+              <Play className="w-8 h-8 fill-current ml-1" />
+            </div>
+          </div>
+        )}
+        {hasStarted && (
+          <iframe
+            src={iframeSrc}
+            loading="lazy"
+            className="w-full h-full border-0"
+            allowFullScreen
+            allow="autoplay; fullscreen; picture-in-picture"
+          ></iframe>
+        )}
       </div>
     );
   }
@@ -281,7 +300,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
         onTimeUpdate={handleTimeUpdate}
         onEnded={handleEnded}
         playsInline
-        className="w-full h-full object-contain cursor-pointer"
+        className={`w-full h-full object-contain cursor-pointer transition-all duration-700 ${!hasStarted ? "blur-2xl scale-105" : "blur-0 scale-100"}`}
       />
 
       {/* Bunny Embed Switcher Badge */}
@@ -299,7 +318,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
       {!isPlaying && (
         <div
           onClick={togglePlay}
-          className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[1px] cursor-pointer"
+          className={`absolute inset-0 flex items-center justify-center bg-black/40 ${!hasStarted ? "backdrop-blur-2xl" : "backdrop-blur-[1px]"} cursor-pointer transition-all duration-700`}
         >
           <div className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white flex items-center justify-center shadow-2xl hover:scale-110 hover:bg-amber-500 hover:text-black hover:border-transparent transition-all duration-300">
             <Play className="w-7 h-7 fill-current translate-x-0.5" />
