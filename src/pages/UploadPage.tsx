@@ -220,54 +220,48 @@ export const UploadPage: React.FC = () => {
       }
 
       if (uploadMode === 'uqload' && selectedFile) {
-        setUploadStep('authorizing');
-        const res = await fetch('/api/uqload/upload-server');
-        if (!res.ok) throw new Error('Failed to fetch Uqload configuration');
-        const config = await res.json();
-        if (config.error) throw new Error(config.error);
-        
         setUploadStep('uploading');
-        setUploadProgress(10);
-        
-        const formData = new FormData();
-        formData.append('key', config.apiKey);
-        formData.append('file', selectedFile);
-        formData.append('file_title', title.trim());
-        formData.append('html_redirect', '0');
-        
-        const result = await new Promise((resolve, reject) => {
-           const xhr = new XMLHttpRequest();
-           xhr.open('POST', config.uploadUrl);
-           xhr.upload.onprogress = (e) => {
-             if (e.lengthComputable) {
-               const p = Math.round((e.loaded / e.total) * 90);
-               setUploadProgress(10 + p);
-             }
-           };
-           xhr.onload = () => {
-             if (xhr.status === 200) {
-               try {
-                 resolve(JSON.parse(xhr.responseText));
-               } catch (err) {
-                 reject(new Error('Invalid JSON from Uqload'));
-               }
-             } else {
-               reject(new Error('Uqload upload failed with status ' + xhr.status));
-             }
-           };
-           xhr.onerror = () => reject(new Error('Uqload upload network error'));
-           xhr.send(formData);
+        setUploadProgress(0);
+
+        const result = await new Promise<any>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const endpoint = `/api/uqload/upload?title=${encodeURIComponent(title.trim())}`;
+
+          xhr.open('POST', endpoint);
+          xhr.setRequestHeader('Content-Type', selectedFile.type || 'video/mp4');
+
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              setUploadProgress(Math.round((e.loaded / e.total) * 95));
+            }
+          };
+
+          xhr.onload = () => {
+            let payload: any = {};
+            try {
+              payload = JSON.parse(xhr.responseText || '{}');
+            } catch {
+              reject(new Error('Invalid JSON response from Uqload upload proxy'));
+              return;
+            }
+
+            if (xhr.status >= 200 && xhr.status < 300 && payload.success && payload.fileCode) {
+              resolve(payload);
+            } else {
+              reject(new Error(payload.error || `Uqload upload failed with status ${xhr.status}`));
+            }
+          };
+
+          xhr.onerror = () => reject(new Error('Uqload upload network error'));
+          xhr.onabort = () => reject(new Error('Uqload upload was cancelled'));
+          xhr.send(selectedFile);
         });
-        
-        if (!result || !result.files || !result.files[0] || !result.files[0].filecode) {
-           throw new Error('Uqload upload failed or returned invalid format');
-        }
-        
-        const filecode = result.files[0].filecode;
-        const finalEmbedUrl = `https://uqload.vc/e/${filecode}`;
-        
+
+        setUploadProgress(100);
         setUploadStep('done');
-        
+
+        const finalEmbedUrl = result.embedUrl || `https://uqload.vc/e/${result.fileCode}`;
+
         const newVideo = await videoService.createVideo({
           title: title.trim(),
           description: description.trim(),
@@ -277,14 +271,19 @@ export const UploadPage: React.FC = () => {
           moderation_status: 'published',
           is_age_restricted: isAgeRestricted,
           allow_comments: allowComments,
-          bunny_video_id: 'embed',
+          bunny_video_id: 'uqload',
           video_url: finalEmbedUrl,
           thumbnail_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
           preview_animation_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
           duration: 0,
         });
-        
-        showToast({ type: 'success', title: 'Upload Successful', message: 'Your video is now on Uqload Stream.' });
+
+        showToast({
+          type: 'success',
+          title: 'Upload Successful',
+          message: 'Your video is now on Uqload Stream.',
+        });
+
         setTimeout(() => {
           navigate(`/watch/${newVideo.slug || newVideo.id}`);
         }, 1200);
