@@ -25,7 +25,6 @@ import {
 import { uploadToLulu } from '../lib/lulu';
 import { Category, Tag } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { supabase } from '../lib/supabase';
 import { useNotification } from '../context/NotificationContext';
 
 export const UploadPage: React.FC = () => {
@@ -221,81 +220,68 @@ export const UploadPage: React.FC = () => {
       }
 
       if (uploadMode === 'uqload' && selectedFile) {
-        if (!user?.id) {
-          throw new Error('Please sign in before uploading to Uqload.');
-        }
-
         setUploadStep('uploading');
-        setUploadProgress(5);
+        setUploadProgress(0);
 
-        const safeName = selectedFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const storagePath = `${user.id}/${Date.now()}-${safeName}`;
+        // Direct browser -> Uqload upload. Supabase Storage and the Worker
+        // do not receive the video bytes.
+        const serverResponse = await fetch('/api/uqload/upload-server');
+        const serverConfig = await serverResponse.json().catch(() => ({}));
 
-        const { data: stored, error: storageError } = await supabase.storage
-          .from('uqload-staging')
-          .upload(storagePath, selectedFile, {
-            contentType: selectedFile.type || 'video/mp4',
-            cacheControl: '3600',
-            upsert: false,
-          });
-
-        if (storageError || !stored?.path) {
-          throw new Error(storageError?.message || 'Failed to upload video to Supabase Storage.');
+        if (!serverResponse.ok || !serverConfig.uploadUrl || !serverConfig.apiKey) {
+          throw new Error(serverConfig.error || 'Failed to get Uqload upload server.');
         }
 
-        setUploadProgress(65);
+        const result = await new Promise<any>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', serverConfig.uploadUrl);
 
-        const { data: publicData } = supabase.storage
-          .from('uqload-staging')
-          .getPublicUrl(stored.path);
+          const form = new FormData();
+          form.append('key', serverConfig.apiKey);
+          form.append('file_title', title.trim());
+          form.append('file_public', '1');
+          form.append('file_adult', isAgeRestricted ? '1' : '0');
+          form.append('html_redirect', '0');
+          form.append('file', selectedFile, selectedFile.name);
 
-        if (!publicData?.publicUrl) {
-          throw new Error('Failed to create a public Storage URL for Uqload.');
-        }
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              setUploadProgress(Math.round((event.loaded / event.total) * 98));
+            }
+          };
 
-        const response = await fetch('/api/uqload/upload-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            videoUrl: publicData.publicUrl,
-            title: title.trim(),
-          }),
+          xhr.onload = () => {
+            let payload: any = {};
+            try { payload = JSON.parse(xhr.responseText || '{}'); }
+            catch { reject(new Error('Invalid JSON response from Uqload.')); return; }
+            const uploaded = payload?.files?.[0];
+            if (xhr.status >= 200 && xhr.status < 300 && payload.status === 200 && uploaded?.filecode) {
+              resolve(uploaded);
+            } else {
+              reject(new Error(uploaded?.status || payload.msg || 'Uqload upload failed (' + xhr.status + ')'));
+            }
+          };
+          xhr.onerror = () => reject(new Error('Uqload upload network error.'));
+          xhr.onabort = () => reject(new Error('Uqload upload was cancelled.'));
+          xhr.send(form);
         });
-
-        const result = await response.json().catch(() => ({}));
-
-        if (!response.ok || !result.success || !result.fileCode) {
-          throw new Error(result.error || 'Uqload remote upload failed.');
-        }
 
         setUploadProgress(100);
         setUploadStep('done');
+        const embedUrl = 'https://uqload.vc/e/' + result.filecode;
 
         const newVideo = await videoService.createVideo({
-          title: title.trim(),
-          description: description.trim(),
-          category_id: categoryId,
-          creator_id: user.id,
-          visibility,
-          moderation_status: 'published',
-          is_age_restricted: isAgeRestricted,
-          allow_comments: allowComments,
-          bunny_video_id: 'uqload',
-          video_url: result.embedUrl || `https://uqload.vc/e/${result.fileCode}`,
+          title: title.trim(), description: description.trim(), category_id: categoryId,
+          creator_id: user?.id || 'anonymous_user', visibility, moderation_status: 'published',
+          is_age_restricted: isAgeRestricted, allow_comments: allowComments, bunny_video_id: 'uqload',
+          video_url: embedUrl,
           thumbnail_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
           preview_animation_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
           duration: 0,
         });
 
-        showToast({
-          type: 'success',
-          title: 'Upload Submitted',
-          message: 'Your video was sent to Uqload successfully.',
-        });
-
-        setTimeout(() => {
-          navigate(`/watch/${newVideo.slug || newVideo.id}`);
-        }, 1200);
+        showToast({ type: 'success', title: 'Upload Successful', message: 'Your video has been uploaded directly to Uqload.' });
+        setTimeout(() => navigate('/watch/' + (newVideo.slug || newVideo.id)), 1200);
         return;
       }
 
