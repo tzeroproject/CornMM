@@ -22,6 +22,7 @@ import {
   getBunnyThumbnailUrl,
   getBunnyPreviewUrl 
 } from '../lib/bunny';
+import { uploadToLulu } from '../lib/lulu';
 import { Category, Tag } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
@@ -35,7 +36,7 @@ export const UploadPage: React.FC = () => {
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadMode, setUploadMode] = useState<"bunny" | "lulu" | "good">("bunny");
+  const [uploadMode, setUploadMode] = useState<"bunny" | "lulu" | "uqload" | "good">("bunny");
   const [embedUrl, setEmbedUrl] = useState("");
   const [isDragging, setIsDragging] = useState(false);
 
@@ -119,11 +120,7 @@ export const UploadPage: React.FC = () => {
   };
 
   const performUpload = async (forceSimulated: boolean = false) => {
-    if (!user) {
-      showToast({ type: 'warning', title: 'Authentication Required', message: 'Please sign in to upload video content.' });
-      navigate('/corn-admin-login');
-      return;
-    }
+    
 
     if (!title.trim()) {
       showToast({ type: 'error', title: 'Title Required' });
@@ -137,6 +134,11 @@ export const UploadPage: React.FC = () => {
     
     if (uploadMode === 'lulu' && !selectedFile) {
       showToast({ type: 'error', title: 'Video File Required for Lulu Stream' });
+      return;
+    }
+    
+    if (uploadMode === 'uqload' && !selectedFile) {
+      showToast({ type: 'error', title: 'Video File Required for Uqload Stream' });
       return;
     }
 
@@ -163,7 +165,7 @@ export const UploadPage: React.FC = () => {
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId,
-          creator_id: user.id,
+          creator_id: user?.id || 'anonymous_user',
           visibility,
           moderation_status: 'published',
           is_age_restricted: isAgeRestricted,
@@ -183,9 +185,44 @@ export const UploadPage: React.FC = () => {
       }
 
       if (uploadMode === 'lulu' && selectedFile) {
+        setUploadStep('uploading');
+        setUploadProgress(0);
+
+        const luluResult = await uploadToLulu({
+          file: selectedFile,
+          title: title.trim(),
+          onProgress: (percent) => setUploadProgress(percent),
+        });
+
+        setUploadStep('done');
+
+        const newVideo = await videoService.createVideo({
+          title: title.trim(),
+          description: description.trim(),
+          category_id: categoryId,
+          creator_id: user?.id || 'anonymous_user',
+          visibility,
+          moderation_status: 'published',
+          is_age_restricted: isAgeRestricted,
+          allow_comments: allowComments,
+          bunny_video_id: 'embed',
+          video_url: luluResult.embedUrl,
+          thumbnail_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
+          preview_animation_url: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
+          duration: 0,
+        });
+        
+        showToast({ type: 'success', title: 'Upload Successful', message: 'Your video is now on Lulu Stream.' });
+        setTimeout(() => {
+          navigate(`/watch/${newVideo.slug || newVideo.id}`);
+        }, 1200);
+        return;
+      }
+
+      if (uploadMode === 'uqload' && selectedFile) {
         setUploadStep('authorizing');
-        const res = await fetch('/api/lulu/upload-server');
-        if (!res.ok) throw new Error('Failed to fetch Lulu configuration');
+        const res = await fetch('/api/uqload/upload-server');
+        if (!res.ok) throw new Error('Failed to fetch Uqload configuration');
         const config = await res.json();
         if (config.error) throw new Error(config.error);
         
@@ -212,22 +249,22 @@ export const UploadPage: React.FC = () => {
                try {
                  resolve(JSON.parse(xhr.responseText));
                } catch (err) {
-                 reject(new Error('Invalid JSON from Lulu'));
+                 reject(new Error('Invalid JSON from Uqload'));
                }
              } else {
-               reject(new Error('Lulu upload failed with status ' + xhr.status));
+               reject(new Error('Uqload upload failed with status ' + xhr.status));
              }
            };
-           xhr.onerror = () => reject(new Error('Lulu upload network error'));
+           xhr.onerror = () => reject(new Error('Uqload upload network error'));
            xhr.send(formData);
         });
         
         if (!result || !result.files || !result.files[0] || !result.files[0].filecode) {
-           throw new Error('Lulu upload failed or returned invalid format');
+           throw new Error('Uqload upload failed or returned invalid format');
         }
         
         const filecode = result.files[0].filecode;
-        const finalEmbedUrl = `https://lulustream.com/e/${filecode}`;
+        const finalEmbedUrl = `https://uqload.vc/e/${filecode}`;
         
         setUploadStep('done');
         
@@ -235,7 +272,7 @@ export const UploadPage: React.FC = () => {
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId,
-          creator_id: user.id,
+          creator_id: user?.id || 'anonymous_user',
           visibility,
           moderation_status: 'published',
           is_age_restricted: isAgeRestricted,
@@ -247,93 +284,141 @@ export const UploadPage: React.FC = () => {
           duration: 0,
         });
         
-        showToast({ type: 'success', title: 'Upload Successful', message: 'Your video is now on Lulu Stream.' });
+        showToast({ type: 'success', title: 'Upload Successful', message: 'Your video is now on Uqload Stream.' });
         setTimeout(() => {
           navigate(`/watch/${newVideo.slug || newVideo.id}`);
         }, 1200);
         return;
       }
 
-      // 1. Authorize on Bunny Stream (server endpoint keeps secrets safe)
-      let bunnyInit;
+      // 1. Authorize + upload on Bunny Stream (primary host). If Bunny fails
+      // at either step and Auto-Resilience is on, fall back to LuluStream
+      // as a real secondary host — only if Lulu also fails do we drop to
+      // the simulated demo stream as a last resort.
+      let videoRecord: {
+        provider: 'bunny' | 'lulu' | 'simulated';
+        bunnyVideoId: string;
+        videoUrl: string;
+        thumbnailUrl: string;
+        previewUrl?: string;
+        duration: number;
+      };
+
+      const runBunnyUpload = async (simulated: boolean) => {
+        const bunnyInit = await initBunnyVideoUpload(title.trim(), simulated);
+
+        setUploadStep('uploading');
+        await uploadVideoBinary({
+          file: selectedFile as File,
+          uploadUrl: bunnyInit.uploadUrl,
+          proxyUploadUrl: bunnyInit.proxyUploadUrl,
+          onProgress: (percent) => {
+            setUploadProgress(percent);
+            if (percent >= 98) setUploadStep('transcoding');
+          },
+        });
+
+        setUploadProgress(100);
+        setUploadStep('transcoding');
+        await new Promise((r) => setTimeout(r, 1500));
+
+        const isSimulated = Boolean(bunnyInit.isSimulated || bunnyInit.videoId.startsWith('bny_'));
+        return {
+          provider: isSimulated ? ('simulated' as const) : ('bunny' as const),
+          bunnyVideoId: bunnyInit.videoId,
+          videoUrl: isSimulated
+            ? 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+            : getBunnyHlsUrl(bunnyInit.videoId, bunnyInit.cdnHostname),
+          thumbnailUrl: isSimulated
+            ? 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1280&auto=format&fit=crop&q=85'
+            : getBunnyThumbnailUrl(bunnyInit.videoId, bunnyInit.cdnHostname),
+          previewUrl: isSimulated
+            ? 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=640&auto=format&fit=crop&q=80'
+            : getBunnyPreviewUrl(bunnyInit.videoId, bunnyInit.cdnHostname),
+          duration: 180,
+        };
+      };
+
+      const runLuluBackupUpload = async () => {
+        setUploadStep('authorizing');
+        setUploadProgress(0);
+        const luluResult = await uploadToLulu({
+          file: selectedFile as File,
+          title: title.trim(),
+          onProgress: (percent) => {
+            setUploadProgress(percent);
+            if (percent >= 98) setUploadStep('transcoding');
+          },
+        });
+        return {
+          provider: 'lulu' as const,
+          bunnyVideoId: 'embed',
+          videoUrl: luluResult.embedUrl,
+          thumbnailUrl: 'https://images.unsplash.com/photo-1616530940355-351fabd9524b?w=800&auto=format&fit=crop&q=80',
+          previewUrl: undefined,
+          duration: 0,
+        };
+      };
+
       try {
-        bunnyInit = await initBunnyVideoUpload(title.trim(), forceSimulated);
-      } catch (initErr: any) {
-        if (!forceSimulated && autoFallback) {
-          console.warn('Bunny API rejected credentials, using resilient fallback mode:', initErr);
+        videoRecord = await runBunnyUpload(forceSimulated);
+      } catch (bunnyErr: any) {
+        if (forceSimulated || !autoFallback) {
+          setBunnyError({
+            message: bunnyErr.message,
+            guidance: bunnyErr.guidance,
+            statusCode: bunnyErr.statusCode,
+          });
+          throw bunnyErr;
+        }
+
+        console.warn('Bunny Stream failed, trying LuluStream backup host:', bunnyErr);
+        showToast({
+          type: 'warning',
+          title: 'Switching to Backup Host',
+          message: 'Bunny Stream is unavailable — uploading to the LuluStream backup instead.',
+        });
+
+        try {
+          videoRecord = await runLuluBackupUpload();
+        } catch (luluErr: any) {
+          console.warn('LuluStream backup also failed, using demo stream mode:', luluErr);
           showToast({
             type: 'warning',
             title: 'Resilient Mode Activated',
-            message: 'Bunny API rejected credentials. Video will be published in demo stream mode so you can watch immediately.',
+            message: 'Bunny Stream and the LuluStream backup are both unavailable. Video will be published in demo stream mode so you can watch immediately.',
           });
-          bunnyInit = await initBunnyVideoUpload(title.trim(), true);
-        } else {
-          setBunnyError({
-            message: initErr.message,
-            guidance: initErr.guidance,
-            statusCode: initErr.statusCode,
-          });
-          throw initErr;
+          videoRecord = await runBunnyUpload(true);
         }
       }
-
-      setUploadStep('uploading');
-
-      // 2. Stream binary upload directly to Bunny CDN or secure proxy
-      await uploadVideoBinary({
-        file: selectedFile as File,
-        uploadUrl: bunnyInit.uploadUrl,
-        proxyUploadUrl: bunnyInit.proxyUploadUrl,
-        onProgress: (percent) => {
-          setUploadProgress(percent);
-          if (percent >= 98) {
-            setUploadStep('transcoding');
-          }
-        },
-      });
-
-      setUploadProgress(100);
-      setUploadStep('transcoding');
-
-      // Wait brief moment for initial transcode inspection
-      await new Promise((r) => setTimeout(r, 1500));
-
-      // 3. Generate stream and thumbnail URLs
-      const isSimulated = Boolean(bunnyInit.isSimulated || bunnyInit.videoId.startsWith('bny_'));
-      const hlsUrl = isSimulated
-        ? 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
-        : getBunnyHlsUrl(bunnyInit.videoId, bunnyInit.cdnHostname);
-      const thumbUrl = isSimulated
-        ? 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1280&auto=format&fit=crop&q=85'
-        : getBunnyThumbnailUrl(bunnyInit.videoId, bunnyInit.cdnHostname);
-      const previewUrl = isSimulated
-        ? 'https://images.unsplash.com/photo-1536240478700-b869070f9279?w=640&auto=format&fit=crop&q=80'
-        : getBunnyPreviewUrl(bunnyInit.videoId, bunnyInit.cdnHostname);
 
       // Store video metadata in database
       const newVideo = await videoService.createVideo({
         title: title.trim(),
         description: description.trim(),
         category_id: categoryId,
-        creator_id: user.id,
+        creator_id: user?.id || 'anonymous_user',
         visibility,
         moderation_status: 'published',
         is_age_restricted: isAgeRestricted,
         allow_comments: allowComments,
-        bunny_video_id: bunnyInit.videoId,
-        video_url: hlsUrl,
-        thumbnail_url: thumbUrl,
-        preview_animation_url: previewUrl,
-        duration: 180,
+        bunny_video_id: videoRecord.bunnyVideoId,
+        video_url: videoRecord.videoUrl,
+        thumbnail_url: videoRecord.thumbnailUrl,
+        preview_animation_url: videoRecord.previewUrl,
+        duration: videoRecord.duration,
       });
 
       setUploadStep('done');
+      const successMessages: Record<typeof videoRecord.provider, string> = {
+        bunny: 'Your stream is live on Bunny CDN.',
+        lulu: 'Your stream is live on the LuluStream backup host.',
+        simulated: 'Video published and ready to watch.',
+      };
       showToast({
         type: 'success',
         title: 'Video Published!',
-        message: isSimulated 
-          ? 'Video published and ready to watch.' 
-          : 'Your stream is live on Bunny CDN.',
+        message: successMessages[videoRecord.provider],
       });
       setTimeout(() => {
         navigate(`/watch/${newVideo.slug || newVideo.id}`);
@@ -445,17 +530,22 @@ export const UploadPage: React.FC = () => {
         </button>
         <button
           type="button"
+          onClick={() => setUploadMode('uqload')}
+          className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${uploadMode === 'uqload' ? 'bg-purple-500/20 text-purple-400' : 'text-zinc-400 hover:text-white'}`}
+        >
+          Uqload Stream
+        </button>
+        <button
+          type="button"
           onClick={() => setUploadMode('good')}
           className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${uploadMode === 'good' ? 'bg-blue-500/20 text-blue-400' : 'text-zinc-400 hover:text-white'}`}
-        >
-          Good Stream
-        </button>
+        >Any Embed Link</button>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
 
         {/* Upload Mode conditional rendering */}
-        {uploadMode === 'bunny' || uploadMode === 'lulu' ? (
+        {uploadMode === 'bunny' || uploadMode === 'lulu' || uploadMode === 'uqload' ? (
           !selectedFile ? (
             <div
               onDragOver={handleDragOver}
@@ -576,7 +666,7 @@ export const UploadPage: React.FC = () => {
               Category
             </label>
             <select
-              value={categoryId}
+              value={categoryId || ''}
               onChange={(e) => setCategoryId(e.target.value)}
               className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-500 transition-colors"
             >
@@ -591,7 +681,7 @@ export const UploadPage: React.FC = () => {
               Visibility
             </label>
             <select
-              value={visibility}
+              value={visibility || 'public'}
               onChange={(e) => setVisibility(e.target.value as any)}
               className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-500 transition-colors"
             >
@@ -613,7 +703,7 @@ export const UploadPage: React.FC = () => {
                 className="w-4 h-4 rounded text-amber-500 bg-[#050505] border-white/20 focus:ring-amber-500"
               />
               <span className="text-xs text-zinc-300">
-                <strong>Auto-Resilience (အလိုအလျောက် စမ်းသပ်မုဒ်):</strong> Bunny Stream ချိတ်ဆက်မှု အဆင်မပြေပါက Upload မပျက်သွားစေဘဲ အလိုအလျောက် တင်ပေးမည်။
+                <strong>Auto-Resilience (အလိုအလျောက် backup host):</strong> Bunny Stream ချိတ်ဆက်မှု အဆင်မပြေပါက LuluStream backup host ကို အလိုအလျောက် ပြောင်းပြီး တင်ပေးမည်။ Lulu ပါ မအောင်မြင်မှသာ demo mode ကို အသုံးပြုမည်။
               </span>
             </label>
 
@@ -654,7 +744,7 @@ export const UploadPage: React.FC = () => {
           </button>
           <button
             type="submit"
-            disabled={isUploading || ((uploadMode === "bunny" || uploadMode === "lulu") && !selectedFile) || (uploadMode === "good" && !embedUrl)}
+            disabled={isUploading || ((uploadMode === "bunny" || uploadMode === "lulu" || uploadMode === "uqload") && !selectedFile) || (uploadMode === "good" && !embedUrl)}
             className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold disabled:opacity-50 transition-all shadow-lg shadow-amber-500/20"
           >
             {isUploading ? 'Publishing Video...' : 'Publish to cornmm'}

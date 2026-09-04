@@ -152,7 +152,7 @@ export const EditVideoPage: React.FC = () => {
           <div>
             <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Category</label>
             <select
-              value={categoryId}
+              value={categoryId || ''}
               onChange={(e) => setCategoryId(e.target.value)}
               className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
             >
@@ -165,7 +165,7 @@ export const EditVideoPage: React.FC = () => {
           <div>
             <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Visibility</label>
             <select
-              value={visibility}
+              value={visibility || 'public'}
               onChange={(e) => setVisibility(e.target.value as any)}
               className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
             >

@@ -66,8 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
       {/* Right: Actions, Upload & Authenticated User Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
         {/* Upload Button */}
-        {user && isCreator && (
-          <Link
+        <Link
             to="/upload"
             id="btn-nav-upload"
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black shadow-md shadow-amber-500/20 transition-all uppercase tracking-wider text-[11px]"
@@ -75,7 +74,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
             <Upload className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Upload Video</span>
           </Link>
-        )}
 
         {/* Admin Link if Admin */}
         {isAdmin && (

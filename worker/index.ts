@@ -19,6 +19,7 @@ export interface Env {
   BUNNY_LIBRARY_ID?: string;
   BUNNY_CDN_HOSTNAME?: string;
   BUNNY_WEBHOOK_KEY?: string;
+  LULU_API_KEY?: string;
   ASSETS: Fetcher;
 }
 
@@ -66,6 +67,7 @@ export default {
           timestamp: new Date().toISOString(),
           supabaseConfigured: hasValidSupabase,
           bunnyConfigured: !!(env.BUNNY_API_KEY && env.BUNNY_LIBRARY_ID),
+          luluConfigured: !!env.LULU_API_KEY,
         });
       }
 
@@ -294,6 +296,83 @@ export default {
         }
 
         return json({ success: true, received: true, videoGuid, status });
+      }
+
+      // ---------------------------------------------------------------
+      // 1b. LULUSTREAM — SECONDARY / BACKUP UPLOAD HOST
+      // Receives the raw file bytes from the browser (same pattern as the
+      // Bunny proxy above), then repackages them as multipart/form-data
+      // server-side to call LuluStream's API. LULU_API_KEY never reaches
+      // the browser. Used automatically when Bunny Stream fails, and can
+      // also be called directly for a manual Lulu upload.
+      // ---------------------------------------------------------------
+      if (pathname === '/api/lulu/upload' && method === 'PUT') {
+        const luluKey = clean(env.LULU_API_KEY);
+        if (!luluKey) {
+          return json(
+            { error: 'LuluStream backup is not configured (LULU_API_KEY missing).' },
+            { status: 500 }
+          );
+        }
+
+        const title = url.searchParams.get('title') || 'Untitled Video';
+
+        // 1. Ask LuluStream which upload server to use for this key.
+        const serverRes = await fetch(
+          `https://lulustream.com/api/upload/server?key=${encodeURIComponent(luluKey)}`
+        );
+        if (!serverRes.ok) {
+          return json(
+            { error: `LuluStream server lookup failed (${serverRes.status})` },
+            { status: 502 }
+          );
+        }
+        const serverData = (await serverRes.json()) as any;
+        if (serverData.status !== 200 || !serverData.result) {
+          return json(
+            { error: serverData.msg || 'LuluStream did not return an upload server' },
+            { status: 502 }
+          );
+        }
+        const uploadServerUrl = serverData.result as string;
+
+        // 2. Buffer the incoming file and repackage as multipart/form-data —
+        // LuluStream's upload endpoint requires a real multipart body.
+        const fileBuffer = await request.arrayBuffer();
+        const contentType = request.headers.get('content-type') || 'video/mp4';
+
+        const form = new FormData();
+        form.append('key', luluKey);
+        form.append('file_title', title);
+        form.append('html_redirect', '0');
+        form.append('file', new Blob([fileBuffer], { type: contentType }), 'upload.mp4');
+
+        const uploadRes = await fetch(uploadServerUrl, { method: 'POST', body: form });
+        if (!uploadRes.ok) {
+          const details = await uploadRes.text();
+          return json(
+            { error: `LuluStream upload failed (${uploadRes.status})`, details },
+            { status: 502 }
+          );
+        }
+
+        const uploadData = (await uploadRes.json()) as any;
+        const fileEntry = uploadData?.files?.[0];
+        if (!fileEntry || fileEntry.status !== 'OK' || !fileEntry.filecode) {
+          return json(
+            {
+              error: 'LuluStream returned an unexpected upload response',
+              details: JSON.stringify(uploadData),
+            },
+            { status: 502 }
+          );
+        }
+
+        return json({
+          success: true,
+          fileCode: fileEntry.filecode,
+          embedUrl: `https://lulustream.com/e/${fileEntry.filecode}`,
+        });
       }
 
       // ---------------------------------------------------------------

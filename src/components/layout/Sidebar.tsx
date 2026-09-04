@@ -82,6 +82,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                 <Grid className="w-4 h-4 text-zinc-300" />
                 Categories
               </NavLink>
+              <NavLink to="/upload" className={navLinkClasses} onClick={() => onClose()}>
+                  <Upload className="w-4 h-4 text-amber-400" />
+                  Upload Video
+                </NavLink>
             </nav>
           </div>
 
@@ -104,10 +108,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                   <LayoutDashboard className="w-4 h-4 text-amber-400" />
                   Creator Studio
                 </NavLink>
-                <NavLink to="/upload" className={navLinkClasses} onClick={() => onClose()}>
-                  <Upload className="w-4 h-4 text-amber-400" />
-                  Upload Video
-                </NavLink>
+                
               </nav>
             </div>
           )}

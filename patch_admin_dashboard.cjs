@@ -1,59 +1,21 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/pages/AdminDashboardPage.tsx', 'utf8');
+let content = fs.readFileSync('src/pages/AdminDashboardPage.tsx', 'utf8');
 
-const importAdd = `import { RefreshCw } from 'lucide-react';\n`;
-if (!code.includes('RefreshCw')) {
-  code = code.replace("import { ", "import { RefreshCw, ");
+// Remove the "Review Queue" block
+const reviewQueueStart = content.indexOf('{/* Review Queue */}');
+if (reviewQueueStart !== -1) {
+  // Let's find the end of this block by finding the next section.
+  const nextSection = content.indexOf('{/* Reports Queue */}');
+  if (nextSection !== -1) {
+    content = content.substring(0, reviewQueueStart) + content.substring(nextSection);
+  }
 }
 
-const stateAdd = `
-  const [isSyncing, setIsSyncing] = useState(false);
-  
-  const handleSyncBunny = async () => {
-    if (!user) return;
-    setIsSyncing(true);
-    try {
-      const res = await adminService.syncBunnyVideos(user);
-      showToast({ type: 'success', title: 'Sync Complete', message: \`Successfully synced \${res.syncedCount} new videos from Bunny (\${res.totalBunnyVideos} total).\` });
-      // Reload stats
-      const [st, pv, rep, al] = await Promise.all([
-        adminService.getStats(),
-        adminService.getPendingVideos(),
-        adminService.getReportedContent(),
-        adminService.getAuditLogs(),
-      ]);
-      setStats(st);
-      setPendingVideos(pv);
-      setReports(rep);
-      setAuditLogs(al);
-    } catch (err: any) {
-      showToast({ type: 'error', title: 'Sync Failed', message: err.message });
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-`;
-
-code = code.replace(
-  'const [isLoading, setIsLoading] = useState(true);',
-  'const [isLoading, setIsLoading] = useState(true);' + stateAdd
+// Remove the Pending Review stat card
+content = content.replace(
+  /<div className="bg-\[#0a0a0a\] border border-white\/10 rounded-2xl p-5">\s*<div className="flex items-start justify-between">\s*<div>\s*<div className="text-\[10px\] uppercase font-semibold text-amber-400 mb-1">Pending Review<\/div>\s*<div className="text-2xl font-bold text-amber-400 font-mono">\{stats.pendingVideos\}<\/div>\s*<\/div>\s*<div className="p-2\.5 rounded-xl bg-amber-500\/10">\s*<AlertCircle className="w-5 h-5 text-amber-500" \/>\s*<\/div>\s*<\/div>\s*<\/div>/g,
+  ''
 );
 
-const buttonHTML = `
-          <button
-            onClick={handleSyncBunny}
-            disabled={isSyncing}
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono font-semibold hover:bg-amber-500/20 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={\`w-3 h-3 \${isSyncing ? 'animate-spin' : ''}\`} />
-            {isSyncing ? 'Syncing...' : 'Sync Bunny Videos'}
-          </button>
-`;
-
-code = code.replace(
-  '<div className="flex items-center gap-2">',
-  '<div className="flex flex-col items-end gap-2">' + buttonHTML
-);
-
-fs.writeFileSync('src/pages/AdminDashboardPage.tsx', code);
-console.log("Patched AdminDashboardPage.tsx");
+fs.writeFileSync('src/pages/AdminDashboardPage.tsx', content);
+console.log("AdminDashboardPage patched to remove approval system.");

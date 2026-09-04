@@ -21,25 +21,97 @@ app.use(
 
 // =====================================================
 // LULU STREAM INTEGRATION
+// Secondary / backup video host, used automatically when Bunny Stream
+// is unavailable. The raw file is streamed in from the browser (same
+// pattern as the Bunny upload proxy below) and repackaged server-side
+// as multipart/form-data for LuluStream's API, so LULU_API_KEY never
+// reaches the browser.
 // =====================================================
 
-app.get("/api/lulu/upload-server", async (req, res) => {
-  try {
-    const key = process.env.LULU_API_KEY;
-    if (!key) {
-      return res.status(500).json({ error: "LULU_API_KEY environment variable is missing" });
+app.put(
+  "/api/lulu/upload",
+  express.raw({ type: "*/*", limit: "2gb" }),
+  async (req, res) => {
+    try {
+      const key = (process.env.LULU_API_KEY || "").trim();
+      if (!key) {
+        return res.status(500).json({ error: "LuluStream backup is not configured (LULU_API_KEY missing)." });
+      }
+
+      const title = String(req.query.title || "Untitled Video");
+
+      // 1. Ask LuluStream which upload server to use for this key.
+      const serverResponse = await fetch(`https://lulustream.com/api/upload/server?key=${encodeURIComponent(key)}`);
+      if (!serverResponse.ok) {
+        return res.status(502).json({ error: `LuluStream server lookup failed (${serverResponse.status})` });
+      }
+      const serverData: any = await serverResponse.json();
+      if (serverData.status !== 200 || !serverData.result) {
+        return res.status(502).json({ error: serverData.msg || "LuluStream did not return an upload server" });
+      }
+      const uploadServerUrl = serverData.result as string;
+
+      // 2. req.body is the raw file buffer (thanks to express.raw above).
+      // Repackage it as multipart/form-data — LuluStream requires a real
+      // multipart body, it will not accept a raw binary PUT.
+      const fileBuffer: Buffer = req.body;
+      const contentType = req.headers["content-type"] || "video/mp4";
+
+      const form = new FormData();
+      form.append("key", key);
+      form.append("file_title", title);
+      form.append("html_redirect", "0");
+      form.append("file", new Blob([fileBuffer], { type: contentType as string }), "upload.mp4");
+
+      const uploadResponse = await fetch(uploadServerUrl, { method: "POST", body: form as any });
+      if (!uploadResponse.ok) {
+        const details = await uploadResponse.text();
+        return res.status(502).json({ error: `LuluStream upload failed (${uploadResponse.status})`, details });
+      }
+
+      const uploadData: any = await uploadResponse.json();
+      const fileEntry = uploadData?.files?.[0];
+      if (!fileEntry || fileEntry.status !== "OK" || !fileEntry.filecode) {
+        return res.status(502).json({
+          error: "LuluStream returned an unexpected upload response",
+          details: JSON.stringify(uploadData),
+        });
+      }
+
+      res.json({
+        success: true,
+        fileCode: fileEntry.filecode,
+        embedUrl: `https://lulustream.com/e/${fileEntry.filecode}`,
+      });
+    } catch (error: any) {
+      console.error("Lulu backup upload error:", error);
+      res.status(500).json({ error: error.message });
     }
-    const response = await fetch(`https://lulustream.com/api/upload/server?key=${encodeURIComponent(key.trim())}`);
+  }
+);
+
+
+// =====================================================
+// UQLOAD STREAM INTEGRATION
+// =====================================================
+
+app.get("/api/uqload/upload-server", async (req, res) => {
+  try {
+    const key = process.env.UQLOAD_API_KEY;
+    if (!key) {
+      return res.status(500).json({ error: "UQLOAD_API_KEY environment variable is missing" });
+    }
+    const response = await fetch(`https://uqload.vc/api/upload/server?key=${encodeURIComponent(key.trim())}`);
     if (!response.ok) {
-       throw new Error(`Lulu API returned ${response.status}`);
+       throw new Error(`Uqload API returned ${response.status}`);
     }
     const data = await response.json();
     if (data.status !== 200) {
-       throw new Error(data.msg || "Failed to get Lulu upload server");
+       throw new Error(data.msg || "Failed to get Uqload upload server");
     }
     res.json({ uploadUrl: data.result, apiKey: key });
   } catch (error: any) {
-    console.error("Lulu get upload server error:", error);
+    console.error("Uqload get upload server error:", error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -131,6 +203,9 @@ app.get(
        bunny.libraryId &&
        bunny.hostname
      ),
+
+   lulu:
+     Boolean((process.env.LULU_API_KEY || "").trim()),
 
    time:
      new Date().toISOString()
