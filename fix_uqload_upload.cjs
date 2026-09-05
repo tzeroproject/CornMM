@@ -72,33 +72,43 @@ const replacement = `app.post("/api/uqload/proxy-upload", upload.single('file'),
     }
     headers.Accept = 'application/json';
 
-    const uploadRes = await fetch(uploadUrl, {
-      method: 'POST',
-      headers,
-      body: form,
-      duplex: 'half',
-      signal: AbortSignal.timeout(30 * 60 * 1000)
+    // Use Node's native https client for the multipart stream.
+    // This avoids incompatibilities between the npm form-data stream and
+    // native fetch/undici while preserving the exact multipart format UQLoad expects.
+    const uploadResult = await new Promise((resolve, reject) => {
+      const target = new URL(uploadUrl);
+      const request = require('https').request(target, {
+        method: 'POST',
+        headers,
+        timeout: 30 * 60 * 1000
+      }, (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => { body += chunk; });
+        response.on('end', () => {
+          let parsed;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            reject(new Error(\`UQLoad upload returned invalid JSON (HTTP \${response.statusCode}): \${body.slice(0, 1000)}\`));
+            return;
+          }
+
+          if ((response.statusCode || 500) < 200 || (response.statusCode || 500) >= 300) {
+            reject(new Error(\`UQLoad upload failed (HTTP \${response.statusCode}): \${JSON.stringify(parsed).slice(0, 2000)}\`));
+            return;
+          }
+
+          resolve(parsed);
+        });
+      });
+
+      request.on('timeout', () => {
+        request.destroy(new Error('UQLoad upload timed out after 30 minutes'));
+      });
+      request.on('error', reject);
+      form.pipe(request);
     });
-
-    const uploadText = await uploadRes.text();
-    let uploadResult;
-    try {
-      uploadResult = JSON.parse(uploadText);
-    } catch {
-      return res.status(502).json({
-        error: 'UQLoad upload returned invalid JSON',
-        status: uploadRes.status,
-        details: uploadText.slice(0, 2000)
-      });
-    }
-
-    if (!uploadRes.ok) {
-      return res.status(502).json({
-        error: 'UQLoad upload failed',
-        status: uploadRes.status,
-        details: uploadResult
-      });
-    }
 
     return res.status(200).json(uploadResult);
   } catch (error) {
