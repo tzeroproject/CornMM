@@ -181,6 +181,37 @@ function bunnyConfig(){
 
 
 // =====================================================
+// ADMIN AUTHORIZATION
+// =====================================================
+async function requireAdmin(req: any, res: any): Promise<string | null> {
+  const auth = String(req.headers.authorization || '');
+  const match = auth.match(/^Bearer\\s+(.+)$/i);
+  if (!match || !supabaseAdmin) {
+    res.status(401).json({ error: 'Authentication required' });
+    return null;
+  }
+
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(match[1]);
+  if (error || !user) {
+    res.status(401).json({ error: 'Invalid authentication token' });
+    return null;
+  }
+
+  const { data: profile } = await supabaseAdmin
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile || profile.role !== 'admin') {
+    res.status(403).json({ error: 'Admin access required' });
+    return null;
+  }
+
+  return user.id;
+}
+
+// =====================================================
 // HEALTH CHECK
 // =====================================================
 
@@ -846,6 +877,118 @@ async(req,res)=>{
 // =====================================================
 // SYNC BUNNY VIDEOS
 // =====================================================
+// =====================================================
+// ADMIN: BUNNY -> UQLOAD REMOTE TRANSFER
+// UQLOAD fetches the Bunny MP4 directly; the app server never
+// downloads/re-uploads the video bytes.
+// =====================================================
+app.post("/api/admin/uqload/transfer/:videoId", async (req, res) => {
+  try {
+    const adminId = await requireAdmin(req, res);
+    if (!adminId) return;
+
+    if (!supabaseAdmin) {
+      return res.status(500).json({ error: "Supabase admin client is not configured" });
+    }
+
+    const bunny = bunnyConfig();
+    const uqKey = (process.env.UQLOAD_API_KEY || "").trim();
+
+    if (!bunny.apiKey || !bunny.libraryId || !bunny.hostname) {
+      return res.status(500).json({ error: "Bunny configuration is incomplete" });
+    }
+    if (!uqKey) {
+      return res.status(500).json({ error: "UQLOAD_API_KEY environment variable is missing" });
+    }
+
+    const { videoId } = req.params;
+    const { data: video, error: videoError } = await supabaseAdmin
+      .from("videos")
+      .select("id,title,bunny_video_id,uqload_filecode,uqload_status")
+      .eq("id", videoId)
+      .single();
+
+    if (videoError || !video) {
+      return res.status(404).json({ error: "Video not found" });
+    }
+    if (!video.bunny_video_id) {
+      return res.status(400).json({ error: "This video is not linked to a Bunny video" });
+    }
+    if (video.uqload_filecode) {
+      return res.json({
+        success: true,
+        alreadyTransferred: true,
+        fileCode: video.uqload_filecode,
+        embedUrl: `https://uqload.vc/e/${video.uqload_filecode}`
+      });
+    }
+
+    // Bunny MP4 fallback must be enabled for the library/video.
+    const mp4Url = `https://${bunny.hostname}/${video.bunny_video_id}/play_720p.mp4`;
+
+    await supabaseAdmin.from("videos").update({
+      uqload_status: "uploading",
+      uqload_error: null
+    }).eq("id", video.id);
+
+    const uqResponse = await fetch(
+      `https://uqload.vc/api/upload/url?key=${encodeURIComponent(uqKey)}&url=${encodeURIComponent(mp4Url)}&file_public=1&file_adult=1`
+    );
+
+    const raw = await uqResponse.text();
+    let data: any;
+    try { data = JSON.parse(raw); } catch {
+      data = { status: uqResponse.status, msg: raw };
+    }
+
+    if (!uqResponse.ok || data.status !== 200 || !data.result?.filecode) {
+      await supabaseAdmin.from("videos").update({
+        uqload_status: "failed",
+        uqload_error: data.msg || `UQLOAD API returned ${uqResponse.status}`
+      }).eq("id", video.id);
+
+      return res.status(502).json({
+        error: "UQLOAD remote upload request failed",
+        details: data.msg || raw
+      });
+    }
+
+    const fileCode = String(data.result.filecode);
+    const embedUrl = `https://uqload.vc/e/${fileCode}`;
+
+    await supabaseAdmin.from("videos").update({
+      uqload_filecode: fileCode,
+      uqload_embed_url: embedUrl,
+      uqload_status: "queued",
+      uqload_error: null,
+      uqload_transferred_at: new Date().toISOString()
+    }).eq("id", video.id);
+
+    await supabaseAdmin.from("admin_actions").insert({
+      admin_id: adminId,
+      action: "bunny_to_uqload_transfer",
+      target_type: "video",
+      target_id: video.id,
+      details: {
+        title: video.title,
+        bunny_video_id: video.bunny_video_id,
+        uqload_filecode: fileCode
+      }
+    });
+
+    return res.json({
+      success: true,
+      fileCode,
+      embedUrl,
+      sourceUrl: mp4Url,
+      status: "queued"
+    });
+  } catch (error: any) {
+    console.error("Bunny -> UQLOAD transfer error:", error);
+    return res.status(500).json({ error: error.message || "Transfer failed" });
+  }
+});
+
 app.post("/api/admin/sync-bunny", async (req, res) => {
   try {
     if (!supabaseAdmin) {
