@@ -1,12 +1,6 @@
-// LuluStream helper utilities.
-//
-// LuluStream is used as a SECONDARY / BACKUP video host: when Bunny Stream
-// is unreachable or misconfigured, the upload flow falls back to LuluStream
-// so the creator's upload still succeeds instead of failing outright.
-//
-// The raw file is streamed to our own backend (Worker or Express server),
-// which attaches LULU_API_KEY server-side and forwards it to LuluStream.
-// The key never reaches the browser.
+// Lulu upload helper.
+// The API key stays on the server. The browser sends the video as
+// multipart/form-data so the backend can stream the temporary file onward.
 
 export interface LuluUploadResult {
   success: boolean;
@@ -30,10 +24,12 @@ export function uploadToLulu({
 }): Promise<LuluUploadResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    const url = `/api/lulu/upload?title=${encodeURIComponent(title || 'Untitled Video')}`;
+    const formData = new FormData();
 
-    xhr.open('PUT', url);
-    xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+    formData.append('file', file, file.name || 'upload.mp4');
+    formData.append('file_title', title || 'Untitled Video');
+
+    xhr.open('POST', '/api/lulu/upload');
     xhr.setRequestHeader('Accept', 'application/json');
 
     xhr.upload.onprogress = (event) => {
@@ -60,7 +56,7 @@ export function uploadToLulu({
       }
 
       const err = new Error(
-        data.error || `LuluStream backup upload failed (${xhr.status})`
+        data.error || `Lulu upload failed (${xhr.status})`
       ) as LuluUploadError;
       err.details = data.details;
       err.statusCode = xhr.status;
@@ -68,10 +64,10 @@ export function uploadToLulu({
     };
 
     xhr.onerror = () => {
-      reject(new Error('Network error while uploading to the LuluStream backup host.'));
+      reject(new Error('Network error while uploading to the Lulu backup host.'));
     };
 
-    xhr.send(file);
+    xhr.send(formData);
   });
 }
 
