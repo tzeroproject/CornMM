@@ -33,68 +33,67 @@ app.use(
 // reaches the browser.
 // =====================================================
 
-app.put(
-  "/api/lulu/upload",
-  express.raw({ type: "*/*", limit: "2gb" }),
-  async (req, res) => {
-    try {
-      const key = (process.env.LULU_API_KEY || "").trim();
-      if (!key) {
-        return res.status(500).json({ error: "LuluStream backup is not configured (LULU_API_KEY missing)." });
-      }
-
-      const title = String(req.query.title || "Untitled Video");
-
-      // 1. Ask LuluStream which upload server to use for this key.
-      const serverResponse = await fetch(`https://lulustream.com/api/upload/server?key=${encodeURIComponent(key)}`);
-      if (!serverResponse.ok) {
-        return res.status(502).json({ error: `LuluStream server lookup failed (${serverResponse.status})` });
-      }
-      const serverData: any = await serverResponse.json();
-      if (serverData.status !== 200 || !serverData.result) {
-        return res.status(502).json({ error: serverData.msg || "LuluStream did not return an upload server" });
-      }
-      const uploadServerUrl = serverData.result as string;
-
-      // 2. req.body is the raw file buffer (thanks to express.raw above).
-      // Repackage it as multipart/form-data — LuluStream requires a real
-      // multipart body, it will not accept a raw binary PUT.
-      const fileBuffer: Buffer = req.body;
-      const contentType = req.headers["content-type"] || "video/mp4";
-
-      const form = new FormData();
-      form.append("key", key);
-      form.append("file_title", title);
-      form.append("html_redirect", "0");
-      form.append("file", new Blob([fileBuffer], { type: contentType as string }), "upload.mp4");
-
-      const uploadResponse = await fetch(uploadServerUrl, { method: "POST", body: form as any });
-      if (!uploadResponse.ok) {
-        const details = await uploadResponse.text();
-        return res.status(502).json({ error: `LuluStream upload failed (${uploadResponse.status})`, details });
-      }
-
-      const uploadData: any = await uploadResponse.json();
-      const fileEntry = uploadData?.files?.[0];
-      if (!fileEntry || fileEntry.status !== "OK" || !fileEntry.filecode) {
-        return res.status(502).json({
-          error: "LuluStream returned an unexpected upload response",
-          details: JSON.stringify(uploadData),
-        });
-      }
-
-      res.json({
-        success: true,
-        fileCode: fileEntry.filecode,
-        embedUrl: `https://lulustream.com/e/${fileEntry.filecode}`,
-      });
-    } catch (error: any) {
-      console.error("Lulu backup upload error:", error);
-      res.status(500).json({ error: error.message });
+app.post("/api/lulu/upload", upload.single("file"), async (req: any, res) => {
+  let tempPath = "";
+  try {
+    const key = String(process.env.LULU_API_KEY || "").trim();
+    if (!key) return res.status(500).json({ error: "LuluStream is not configured (LULU_API_KEY missing)." });
+    if (!req.file) return res.status(400).json({ error: "No video file received." });
+    tempPath = req.file.path;
+    const title = String(req.body?.file_title || req.body?.title || req.query?.title || req.file.originalname || "Untitled Video");
+    const lookup = await fetch("https://lulustream.com/api/upload/server?key=" + encodeURIComponent(key), { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(30000) });
+    const lookupText = await lookup.text();
+    let lookupData: any;
+    try { lookupData = JSON.parse(lookupText); } catch {
+      return res.status(502).json({ error: "Lulu upload-server lookup returned invalid JSON.", status: lookup.status, details: lookupText.slice(0, 5000) });
     }
+    if (!lookup.ok || Number(lookupData.status) !== 200 || !lookupData.result) {
+      return res.status(502).json({ error: "Lulu upload-server lookup failed.", status: lookup.status, message: lookupData.msg, details: JSON.stringify(lookupData).slice(0, 5000) });
+    }
+    const uploadServerUrl = String(lookupData.result);
+    const form = new FormData();
+    form.append("key", key);
+    form.append("file_title", title);
+    form.append("file_public", "1");
+    form.append("file_adult", "1");
+    form.append("html_redirect", "0");
+    form.append("file", fs.createReadStream(tempPath), { filename: req.file.originalname || "upload.mp4", contentType: req.file.mimetype || "application/octet-stream", knownLength: req.file.size });
+    const headers: any = form.getHeaders();
+    headers.Accept = "application/json";
+    headers["Content-Length"] = String(await new Promise<number>((resolve, reject) => form.getLength((err, length) => err ? reject(err) : resolve(length))));
+    const uploadData: any = await new Promise((resolve, reject) => {
+      const target = new URL(uploadServerUrl);
+      const client = target.protocol === "https:" ? require("https") : require("http");
+      const request = client.request(target, { method: "POST", headers, timeout: 30 * 60 * 1000 }, (response: any) => {
+        const status = Number(response.statusCode || 500);
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => { body += chunk; });
+        response.on("end", () => {
+          let parsed: any;
+          try { parsed = JSON.parse(body); } catch { reject(new Error("Lulu upload returned non-JSON HTTP " + status + ": " + body.slice(0, 5000))); return; }
+          if (status < 200 || status >= 300) { reject(new Error("Lulu upload HTTP " + status + ": " + JSON.stringify(parsed).slice(0, 5000))); return; }
+          resolve(parsed);
+        });
+      });
+      request.on("timeout", () => request.destroy(new Error("Lulu upload timed out after 30 minutes")));
+      request.on("error", reject);
+      form.pipe(request);
+    });
+    const fileEntry = Array.isArray(uploadData?.files) ? uploadData.files.find((x: any) => x && (x.filecode || x.fileCode || x.file_code)) : null;
+    const fileCode = fileEntry?.filecode || fileEntry?.fileCode || fileEntry?.file_code;
+    if (!fileCode) {
+      console.error("Lulu upload response:", JSON.stringify(uploadData).slice(0, 10000));
+      return res.status(502).json({ error: "Lulu returned an unexpected upload response.", luluStatus: uploadData?.status, luluMessage: uploadData?.msg, details: JSON.stringify(uploadData).slice(0, 10000) });
+    }
+    return res.json({ success: true, fileCode: String(fileCode), embedUrl: "https://lulustream.com/e/" + String(fileCode) });
+  } catch (error: any) {
+    console.error("Lulu upload error:", error);
+    return res.status(502).json({ error: error?.message || "Lulu upload failed.", details: error?.stack ? String(error.stack).slice(0, 5000) : undefined });
+  } finally {
+    if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} }
   }
-);
-
+});
 
 // =====================================================
 // UQLOAD STREAM INTEGRATION
