@@ -1,4 +1,9 @@
 import express from "express";
+import multer from "multer";
+import FormData from "form-data";
+import fs from "fs";
+const upload = multer({ dest: '/tmp/uploads/' });
+
 import path from "path";
 import crypto from "crypto";
 import dotenv from "dotenv";
@@ -95,6 +100,57 @@ app.put(
 // UQLOAD STREAM INTEGRATION
 // =====================================================
 
+
+
+
+
+
+app.post("/api/uqload/proxy-upload", upload.single('file'), async (req, res) => {
+  try {
+    const key = process.env.UQLOAD_API_KEY;
+    if (!key) {
+      return res.status(500).json({ error: "UQLOAD_API_KEY environment variable is missing" });
+    }
+    
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+    
+    const serverRes = await fetch(`https://uqload.vc/api/upload/server?key=${encodeURIComponent(key.trim())}`);
+    const serverData = await serverRes.json();
+    if (serverData.status !== 200 || !serverData.result) {
+      throw new Error("Failed to get Uqload upload server");
+    }
+    const uploadUrl = serverData.result;
+    
+    const form = new FormData();
+    form.append('key', key.trim());
+    form.append('file_title', req.body.file_title || 'Video');
+    form.append('html_redirect', '0');
+    form.append('file', fs.createReadStream(req.file.path), {
+      filename: req.file.originalname,
+      contentType: req.file.mimetype
+    });
+    
+    const uploadRes = await fetch(uploadUrl, {
+      method: 'POST',
+      body: form
+    });
+    
+    const uploadResult = await uploadRes.json();
+    
+    // Clean up temp file
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch(e) {}
+    
+    res.json(uploadResult);
+    
+  } catch (error: any) {
+    console.error("Uqload proxy upload error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 app.get("/api/uqload/upload-server", async (req, res) => {
   try {
     const key = process.env.UQLOAD_API_KEY;
@@ -902,11 +958,15 @@ app.post("/api/admin/uqload/transfer/:videoId", async (req, res) => {
     }
 
     const { videoId } = req.params;
-    const { data: video, error: videoError } = await supabaseAdmin
+    let { data: video, error: videoError } = await supabaseAdmin
       .from("videos")
       .select("id,title,bunny_video_id,uqload_filecode,uqload_status")
       .eq("id", videoId)
       .single();
+      
+    if (videoError && videoError.code === '42703') {
+      return res.status(500).json({ error: "Missing UQLOAD columns in database. Please run the SQL migration in Supabase Dashboard." });
+    }
 
     if (videoError || !video) {
       return res.status(404).json({ error: "Video not found" });
