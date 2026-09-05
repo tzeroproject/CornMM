@@ -170,7 +170,19 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
                     Admin Panel
                   </Link>
                 )}
-
+                
+                <div className="h-px bg-white/5 my-1" />
+                <button
+                  onClick={() => {
+                    signOut();
+                    setShowUserMenu(false);
+                    navigate('/');
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-400 hover:text-rose-300 hover:bg-white/5 rounded-lg transition-colors text-left"
+                >
+                  <LogOut className="w-4 h-4 text-rose-400" />
+                  Sign Out
+                </button>
               </div>
             )}
           </div>
