@@ -19,12 +19,15 @@ import { Video, Report, AdminAction } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
 import { Link, Navigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 
 export const AdminDashboardPage: React.FC = () => {
   const { user, isAdmin } = useAuth();
   const { showToast } = useNotification();
 
-  const [activeTab, setActiveTab] = useState<'reports' | 'audit'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'uqload' | 'audit'>('reports');
+  const [bunnyVideos, setBunnyVideos] = useState<any[]>([]);
+  const [transferringId, setTransferringId] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalVideos: 0,
     
@@ -80,6 +83,7 @@ export const AdminDashboardPage: React.FC = () => {
         
         setReports(rep);
         setAuditLogs(logs);
+        await loadBunnyVideos();
       } catch (err) {
         console.error('Failed to load admin data:', err);
       } finally {
@@ -91,6 +95,57 @@ export const AdminDashboardPage: React.FC = () => {
   }, [isAdmin]);
 
   
+
+
+
+  const loadBunnyVideos = async () => {
+    if (!isAdmin) return;
+    const { data, error } = await supabase
+      .from('videos')
+      .select('id,title,slug,thumbnail_url,bunny_video_id,processing_status,uqload_filecode,uqload_embed_url,uqload_status,uqload_error,uqload_transferred_at')
+      .not('bunny_video_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error) throw error;
+    setBunnyVideos(data || []);
+  };
+
+  const handleBunnyToUqload = async (videoId: string) => {
+    setTransferringId(videoId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Your admin session is missing. Please sign in again.');
+      }
+
+      const response = await fetch(`/api/admin/uqload/transfer/${videoId}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || result.details || 'Transfer failed');
+
+      showToast({
+        type: 'success',
+        title: result.alreadyTransferred ? 'Already Transferred' : 'UQLOAD Transfer Queued',
+        message: result.fileCode ? `UQLOAD file code: ${result.fileCode}` : 'Remote upload has been queued.',
+      });
+
+      await loadBunnyVideos();
+      const logs = await adminService.getAuditLogs();
+      setAuditLogs(logs);
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'UQLOAD Transfer Failed', message: err.message });
+      await loadBunnyVideos().catch(() => undefined);
+    } finally {
+      setTransferringId(null);
+    }
+  };
 
   const handleResolveReport = async (reportId: string, action: 'dismiss' | 'take_down' | 'suspend_user') => {
     if (!user) return;
@@ -176,6 +231,18 @@ export const AdminDashboardPage: React.FC = () => {
       {/* Tab Switcher */}
       <div className="flex border-b border-white/10 text-xs font-semibold gap-2">
         
+
+        <button
+          onClick={() => { setActiveTab('uqload'); loadBunnyVideos().catch((e) => showToast({ type: 'error', title: 'Load Failed', message: e.message })); }}
+          className={`pb-3 px-4 border-b-2 flex items-center gap-2 transition-colors ${
+            activeTab === 'uqload'
+              ? 'border-emerald-400 text-emerald-400'
+              : 'border-transparent text-zinc-400 hover:text-white'
+          }`}
+        >
+          <ExternalLink className="w-4 h-4" />
+          Bunny → UQLOAD ({bunnyVideos.length})
+        </button>
 
         <button
           onClick={() => setActiveTab('reports')}
@@ -282,7 +349,73 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: User Reports Queue */}
+
+      {/* Bunny -> UQLOAD Transfer */}
+      {activeTab === 'uqload' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-bold text-white">Bunny → UQLOAD Remote Transfer</h3>
+              <p className="text-xs text-zinc-500 mt-1">
+                Admin-only. UQLOAD fetches the Bunny MP4 directly; the app server does not download the video bytes.
+              </p>
+            </div>
+            <button
+              onClick={() => loadBunnyVideos().catch((e) => showToast({ type: 'error', title: 'Refresh Failed', message: e.message }))}
+              className="px-3 py-1.5 rounded-lg bg-[#161616] border border-white/10 text-zinc-300 text-xs font-semibold hover:bg-[#202020]"
+            >
+              Refresh
+            </button>
+          </div>
+
+          {bunnyVideos.length === 0 ? (
+            <div className="p-12 text-center rounded-2xl border border-dashed border-white/10 bg-[#0a0a0a]">
+              <VideoIcon className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
+              <h4 className="font-semibold text-white">No Bunny Videos Found</h4>
+              <p className="text-xs text-zinc-500 mt-1">Sync Bunny videos first, then return here.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {bunnyVideos.map((v) => (
+                <div key={v.id} className="p-4 rounded-2xl bg-[#0a0a0a] border border-white/10 flex flex-col md:flex-row gap-4 md:items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <img src={v.thumbnail_url || ''} alt="" className="w-32 aspect-video rounded-lg object-cover bg-black border border-white/10 shrink-0" />
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-semibold text-white truncate">{v.title}</h4>
+                      <p className="text-[10px] text-zinc-500 font-mono mt-1">Bunny: {v.bunny_video_id}</p>
+                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-zinc-400">
+                          Bunny: {v.processing_status || 'unknown'}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] text-zinc-400">
+                          UQLOAD: {v.uqload_status || 'not_started'}
+                        </span>
+                        {v.uqload_filecode && (
+                          <a href={v.uqload_embed_url || `https://uqload.vc/e/${v.uqload_filecode}`} target="_blank" rel="noreferrer" className="text-[10px] text-emerald-400 hover:underline">
+                            {v.uqload_filecode}
+                          </a>
+                        )}
+                      </div>
+                      {v.uqload_error && <p className="text-[10px] text-rose-400 mt-1">{v.uqload_error}</p>}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleBunnyToUqload(v.id)}
+                    disabled={transferringId === v.id || Boolean(v.uqload_filecode)}
+                    className="shrink-0 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-semibold flex items-center justify-center gap-2"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    {transferringId === v.id ? 'Sending...' : v.uqload_filecode ? 'Transferred' : 'Transfer to UQLOAD'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 2: User Reports Queue */
       {activeTab === 'reports' && (
         <div className="space-y-4">
           <h3 className="text-sm font-bold text-white">
