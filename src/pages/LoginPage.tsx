@@ -20,7 +20,11 @@ export const LoginPage: React.FC = () => {
     try {
       const ok = await signIn(identifier, password);
       if (ok) {
-        navigate('/');
+        if (identifier.trim().toLowerCase() === 'cadmin') {
+          navigate('/admin');
+        } else {
+          navigate('/');
+        }
       }
     } catch (err: any) {
       showToast({ type: 'error', title: 'Sign In Failed', message: err.message || 'Invalid credentials' });
