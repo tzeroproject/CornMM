@@ -40,7 +40,7 @@ export const TrendingPage: React.FC = () => {
             Trending Videos
           </h1>
           <p className="text-xs text-zinc-400 mt-1">
-            Top momentum and engagement across the decentralized cornmm network.
+            Top momentum and engagement across the decentralized StreamSphere network.
           </p>
         </div>
 

@@ -59,7 +59,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
   };
 
   return (
-    <div className="group relative flex flex-col rounded-none sm:rounded-2xl bg-[#0a0a0a] border-y border-x-0 sm:border-x border-white/5 hover:border-white/15 transition-all duration-300 overflow-hidden hover:shadow-xl hover:shadow-black">
+    <div className="group relative flex flex-col rounded-xl sm:rounded-2xl bg-[#0a0a0a] border border-white/5 hover:border-white/15 transition-all duration-300 overflow-hidden hover:shadow-xl hover:shadow-black">
       {/* Thumbnail Container */}
       <Link to={`/watch/${video.slug || video.id}`} className="relative aspect-video w-full overflow-hidden bg-[#050505]">
         <img
@@ -103,25 +103,25 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
       </Link>
 
       {/* Details Row */}
-      <div className="p-3.5 flex items-start gap-3">
+      <div className="p-2 sm:p-3.5 flex items-start gap-2 sm:gap-3">
         {/* Creator Avatar */}
         <Link to={`/creator/${video.creator?.username || video.creator_id}`} className="shrink-0 mt-0.5">
           <img
             src={video.creator?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
             alt={video.creator?.display_name || 'Creator'}
-            className="w-8 h-8 rounded-full object-cover border border-white/10 hover:border-amber-500/50 transition-colors"
+            className="w-6 h-6 sm:w-8 sm:h-8 rounded-full object-cover border border-white/10 hover:border-amber-500/50 transition-colors"
           />
         </Link>
 
         {/* Info */}
         <div className="flex-1 min-w-0">
           <Link to={`/watch/${video.slug || video.id}`} className="block">
-            <h3 className="font-semibold text-sm text-white line-clamp-2 leading-snug group-hover:text-amber-400 transition-colors">
+            <h3 className="font-semibold text-xs sm:text-sm text-white line-clamp-2 leading-snug group-hover:text-amber-400 transition-colors">
               {video.title}
             </h3>
           </Link>
 
-          <div className="mt-1 flex items-center gap-1.5 text-xs text-zinc-400">
+          <div className="mt-1 flex items-center gap-1.5 text-[10px] sm:text-xs text-zinc-400">
             <Link
               to={`/creator/${video.creator?.username || video.creator_id}`}
               className="hover:text-zinc-200 truncate font-medium"
@@ -133,7 +133,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
             )}
           </div>
 
-          <div className="mt-1 flex items-center gap-2.5 text-[11px] text-zinc-500">
+          <div className="mt-1 flex items-center gap-1 sm:gap-2.5 text-[9px] sm:text-[11px] text-zinc-500 flex-wrap">
             <span className="flex items-center gap-1">
               <Eye className="w-3 h-3" />
               {formatViews(video.views)}

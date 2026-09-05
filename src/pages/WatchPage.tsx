@@ -52,7 +52,8 @@ const getAnonUser = (): Profile => {
     role: 'user',
     is_verified: false,
     subscriber_count: 0,
-    total_views: 0
+    total_views: 0,
+    created_at: new Date().toISOString()
   };
 };
 
@@ -209,9 +210,9 @@ export const WatchPage: React.FC = () => {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div className="flex flex-col gap-8 max-w-5xl mx-auto">
       {/* Left 2 Columns: Video Player, Title, Creator, Actions, Description, Comments */}
-      <div className="lg:col-span-2 space-y-6">
+      <div className="w-full space-y-6">
         {/* Video Player */}
         <VideoPlayer
           video={video}
@@ -400,21 +401,21 @@ export const WatchPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Right Column: Related Videos Stream */}
+      {/* Related Videos Section (Below Video) */}
       <div className="space-y-4">
         <h3 className="font-bold text-sm text-zinc-200 flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-amber-400" />
           Related Streams
         </h3>
 
-        <div className="space-y-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {relatedVideos.map((item) => (
             <Link
               key={item.id}
               to={`/watch/${item.slug || item.id}`}
-              className="group flex gap-3 p-2 rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/5"
+              className="group flex flex-col gap-2 rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/5 p-2"
             >
-              <div className="relative aspect-video w-36 rounded-lg overflow-hidden bg-black shrink-0 border border-white/5">
+              <div className="relative aspect-video w-full rounded-lg overflow-hidden bg-black shrink-0 border border-white/5">
                 <img
                   src={item.thumbnail_url}
                   alt={item.title}

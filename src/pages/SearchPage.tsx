@@ -86,7 +86,7 @@ export const SearchPage: React.FC = () => {
     <div className="space-y-6">
       {/* Search Header Bar */}
       <div className="p-6 rounded-2xl bg-[#0a0a0a] border border-white/10 shadow-lg space-y-4">
-        <form onSubmit={handleSearchSubmit} className="flex gap-2">
+        <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
             <input
               type="text"
@@ -106,8 +106,8 @@ export const SearchPage: React.FC = () => {
         </form>
 
         {/* Filter Controls Row */}
-        <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-white/5 text-xs">
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-3 border-t border-white/5 text-xs">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <div className="flex items-center gap-1.5 text-zinc-400">
               <SlidersHorizontal className="w-3.5 h-3.5" />
               <span>Category:</span>

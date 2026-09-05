@@ -18,22 +18,21 @@ import { adminService } from '../services/adminService';
 import { Video, Report, AdminAction } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 
 export const AdminDashboardPage: React.FC = () => {
   const { user, isAdmin } = useAuth();
   const { showToast } = useNotification();
 
-  const [activeTab, setActiveTab] = useState<'moderation' | 'reports' | 'audit'>('moderation');
+  const [activeTab, setActiveTab] = useState<'reports' | 'audit'>('reports');
   const [stats, setStats] = useState({
     totalVideos: 0,
-    pendingVideos: 0,
+    
     reportedVideos: 0,
     totalViews: 0,
     totalUsers: 0,
   });
-  const [pendingVideos, setPendingVideos] = useState<Video[]>([]);
-  const [reports, setReports] = useState<Report[]>([]);
+    const [reports, setReports] = useState<Report[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -47,12 +46,12 @@ export const AdminDashboardPage: React.FC = () => {
       // Reload stats
       const [st, pv, rep, al] = await Promise.all([
         adminService.getStats(),
-        adminService.getPendingVideos(),
-        adminService.getReportedContent(),
+        
+        adminService.getReports(),
         adminService.getAuditLogs(),
       ]);
       setStats(st);
-      setPendingVideos(pv);
+      
       setReports(rep);
       setAuditLogs(al);
     } catch (err: any) {
@@ -73,12 +72,12 @@ export const AdminDashboardPage: React.FC = () => {
       try {
         const [st, pv, rep, logs] = await Promise.all([
           adminService.getDashboardStats(),
-          adminService.getPendingVideos(),
+          
           adminService.getReports(),
           adminService.getAuditLogs(),
         ]);
         setStats(st);
-        setPendingVideos(pv);
+        
         setReports(rep);
         setAuditLogs(logs);
       } catch (err) {
@@ -91,36 +90,7 @@ export const AdminDashboardPage: React.FC = () => {
     loadAdminData();
   }, [isAdmin]);
 
-  const handleApproveVideo = async (videoId: string, title: string) => {
-    if (!user) return;
-    try {
-      await adminService.approveVideo(videoId, user);
-      setPendingVideos(pendingVideos.filter((v) => v.id !== videoId));
-      setStats((s) => ({ ...s, pendingVideos: Math.max(0, s.pendingVideos - 1) }));
-      showToast({ type: 'success', title: 'Video Approved', message: `"${title}" is now published.` });
-      const updatedLogs = await adminService.getAuditLogs();
-      setAuditLogs(updatedLogs);
-    } catch (e: any) {
-      showToast({ type: 'error', title: 'Action Failed', message: e.message });
-    }
-  };
-
-  const handleRejectVideo = async (videoId: string, title: string) => {
-    if (!user) return;
-    const reason = window.prompt(`Provide reason for rejecting "${title}":`, 'Violates community guidelines / copyright clearance');
-    if (!reason) return;
-
-    try {
-      await adminService.rejectVideo(videoId, reason, user);
-      setPendingVideos(pendingVideos.filter((v) => v.id !== videoId));
-      setStats((s) => ({ ...s, pendingVideos: Math.max(0, s.pendingVideos - 1) }));
-      showToast({ type: 'warning', title: 'Video Rejected', message: reason });
-      const updatedLogs = await adminService.getAuditLogs();
-      setAuditLogs(updatedLogs);
-    } catch (e: any) {
-      showToast({ type: 'error', title: 'Action Failed', message: e.message });
-    }
-  };
+  
 
   const handleResolveReport = async (reportId: string, action: 'dismiss' | 'take_down' | 'suspend_user') => {
     if (!user) return;
@@ -141,25 +111,7 @@ export const AdminDashboardPage: React.FC = () => {
   };
 
   if (!isAdmin) {
-    return (
-      <div className="py-20 max-w-lg mx-auto text-center space-y-4">
-        <div className="w-16 h-16 rounded-3xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
-          <Shield className="w-8 h-8" />
-        </div>
-        <h2 className="text-xl font-bold text-white font-editorial italic">Administrator Access Required</h2>
-        <p className="text-xs text-zinc-400 leading-relaxed">
-          The cornmm Admin Suite and Moderation Queue is strictly restricted to platform administrators with verified RBAC privileges.
-        </p>
-        <div className="pt-2">
-          <Link
-            to="/corn-admin-login"
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold uppercase tracking-wider shadow-lg shadow-amber-500/20 transition-all"
-          >
-            Sign In with Administrator Account
-          </Link>
-        </div>
-      </div>
-    );
+    return <Navigate to="/corn-admin-login" replace />;
   }
 
   return (
@@ -223,17 +175,7 @@ export const AdminDashboardPage: React.FC = () => {
 
       {/* Tab Switcher */}
       <div className="flex border-b border-white/10 text-xs font-semibold gap-2">
-        <button
-          onClick={() => setActiveTab('moderation')}
-          className={`pb-3 px-4 border-b-2 flex items-center gap-2 transition-colors ${
-            activeTab === 'moderation'
-              ? 'border-amber-400 text-amber-400'
-              : 'border-transparent text-zinc-400 hover:text-white'
-          }`}
-        >
-          <VideoIcon className="w-4 h-4" />
-          Review Queue ({pendingVideos.length})
-        </button>
+        
 
         <button
           onClick={() => setActiveTab('reports')}

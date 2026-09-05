@@ -26,7 +26,7 @@ export const RegisterPage: React.FC = () => {
     setIsLoading(true);
     try {
       await signUp(email, password, displayName, username);
-      showToast({ type: 'success', title: 'Account Created', message: 'Welcome to cornmm!' });
+      showToast({ type: 'success', title: 'Account Created', message: 'Welcome to StreamSphere!' });
       navigate('/dashboard');
     } catch (err: any) {
       showToast({ type: 'error', title: 'Registration Failed', message: err.message });

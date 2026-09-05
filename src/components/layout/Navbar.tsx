@@ -39,7 +39,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
           </div>
           <div className="flex flex-col">
             <span className="font-editorial italic font-semibold text-lg tracking-wide text-white group-hover:text-amber-400 transition-colors">
-              cornmm
+              StreamSphere
             </span>
             <span className="hidden">
               CDN Edition
@@ -65,14 +65,22 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
 
       {/* Right: Actions, Upload & Authenticated User Profile */}
       <div className="flex items-center gap-2 sm:gap-3">
+        {/* Mobile Search Button */}
+        <Link
+          to="/search"
+          className="md:hidden p-2 text-zinc-400 hover:text-zinc-100 hover:bg-white/5 rounded-lg transition-colors"
+          aria-label="Search"
+        >
+          <Search className="w-5 h-5" />
+        </Link>
         {/* Upload Button */}
         <Link
             to="/upload"
             id="btn-nav-upload"
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black shadow-md shadow-amber-500/20 transition-all uppercase tracking-wider text-[11px]"
+            className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-amber-500 hover:bg-amber-400 text-black shadow-md shadow-amber-500/20 transition-all uppercase tracking-wider text-[11px]"
           >
             <Upload className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Upload Video</span>
+            <span className="hidden lg:inline">Upload Video</span>
           </Link>
 
         {/* Admin Link if Admin */}
@@ -81,7 +89,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
             to="/admin"
             id="btn-nav-admin"
             title="Admin Moderation Dashboard"
-            className="p-2 text-zinc-400 hover:text-amber-400 hover:bg-white/5 rounded-lg transition-colors relative"
+            className="hidden sm:block p-2 text-zinc-400 hover:text-amber-400 hover:bg-white/5 rounded-lg transition-colors relative"
           >
             <Shield className="w-5 h-5" />
             <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
@@ -92,7 +100,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
         {user && (
           <button
             id="btn-nav-notifications"
-            className="p-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+            className="hidden sm:block p-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
             title="Notifications"
           >
             <Bell className="w-5 h-5" />
@@ -166,7 +174,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
               </div>
             )}
           </div>
-        ) : null}
+        ) : (
+          <Link
+            to="/corn-admin-login"
+            className="p-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+            title="Log In"
+          >
+            <User className="w-5 h-5" />
+          </Link>
+        )}
       </div>
     </header>
   );

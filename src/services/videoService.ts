@@ -158,7 +158,7 @@ export const videoService = {
       creator_id: videoData.creator_id || '',
       creator: videoData.creator,
       visibility: videoData.visibility || 'public',
-      moderation_status: videoData.moderation_status || 'pending_review',
+      moderation_status: videoData.moderation_status || 'published',
       is_age_restricted: Boolean(videoData.is_age_restricted),
       allow_comments: videoData.allow_comments ?? true,
       views: 0,

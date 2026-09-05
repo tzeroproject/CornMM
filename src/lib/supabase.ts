@@ -31,7 +31,7 @@ export function handleSupabaseError(error: any, context?: string): void {
     if (schemaAvailable !== false) {
       schemaAvailable = false;
       console.error(
-        `[cornmm] Supabase schema is unavailable (${error.code || error.message}). ` +
+        `[StreamSphere] Supabase schema is unavailable (${error.code || error.message}). ` +
         `Cloud database is required; localStorage fallback is disabled.`
       );
     }
@@ -41,7 +41,7 @@ export function handleSupabaseError(error: any, context?: string): void {
 }
 
 if (!isSupabaseConfigured) {
-  console.error('[cornmm] Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+  console.error('[StreamSphere] Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
 }
 
 export const supabase: SupabaseClient = createClient(

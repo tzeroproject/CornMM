@@ -70,32 +70,7 @@ export const HomePage: React.FC = () => {
 
   return (
     <div className="space-y-10">
-      {/* Category Pills Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
-        <button
-          onClick={() => handleCategoryFilter('all')}
-          className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
-            selectedCategory === 'all'
-              ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20'
-              : 'bg-[#111111] border border-white/10 text-zinc-300 hover:border-white/20 hover:text-white'
-          }`}
-        >
-          All Topics
-        </button>
-        {categories.map((cat) => (
-          <button
-            key={cat.id}
-            onClick={() => handleCategoryFilter(cat.id)}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
-              selectedCategory === cat.id
-                ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20'
-                : 'bg-[#111111] border border-white/10 text-zinc-300 hover:border-white/20 hover:text-white'
-            }`}
-          >
-            {cat.name}
-          </button>
-        ))}
-      </div>
+
 
       {/* Hero Featured Video Banner */}
       {featuredVideo && selectedCategory === 'all' && (
@@ -195,76 +170,35 @@ export const HomePage: React.FC = () => {
             })}
           </div>
         </section>
-      )}
 
-      {/* Trending Videos Section */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between px-3 sm:px-0">
-          <div>
+            )}
+
+      {/* Trending Section */}
+      {trendingVideos.length > 0 && selectedCategory === 'all' && (
+        <section className="space-y-4">
+          <div className="flex items-center justify-between px-3 sm:px-0">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <Flame className="w-5 h-5 text-amber-400" />
+              <Flame className="w-5 h-5 text-amber-500 fill-amber-500/20" />
               Trending Now
             </h2>
-            <p className="text-xs text-zinc-400">High engagement and top velocity uploads</p>
           </div>
-          <Link to="/trending" className="text-xs font-medium text-amber-400 hover:text-amber-300 flex items-center gap-1">
-            Explore All <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-        </div>
+          <VideoGrid
+            videos={trendingVideos}
+            isLoading={isLoading}
+            onOpenReport={setReportVideo}
+            onOpenShare={setShareVideo}
+          />
+        </section>
+      )}
 
-        <VideoGrid
-          videos={trendingVideos}
-          isLoading={isLoading}
-          onOpenReport={setReportVideo}
-          onOpenShare={setShareVideo}
-        />
-      </section>
-
-      {/* Popular Categories visual cards */}
-      <section className="space-y-4 pt-6 border-t border-white/5">
+      {/* Latest / All Videos */}
+      <section className="space-y-4">
         <div className="flex items-center justify-between px-3 sm:px-0">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Compass className="w-5 h-5 text-zinc-300" />
-            Explore by Channel Category
+            <Compass className="w-5 h-5 text-emerald-500" />
+            {selectedCategory === 'all' ? 'Latest Uploads' : 'Explore Category'}
           </h2>
-          <Link to="/categories" className="text-xs font-medium text-amber-400 hover:text-amber-300 flex items-center gap-1">
-            All Categories <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
         </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 px-3 sm:px-0">
-          {categories.slice(0, 6).map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => handleCategoryFilter(cat.id)}
-              className="p-4 rounded-xl bg-[#0a0a0a] border border-white/5 hover:border-amber-500/40 text-left transition-all hover:bg-[#111111] group"
-            >
-              <h4 className="font-semibold text-xs text-zinc-200 group-hover:text-amber-400 transition-colors">
-                {cat.name}
-              </h4>
-              <p className="text-[10px] text-zinc-500 mt-1">
-                {cat.video_count} videos
-              </p>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {/* Latest Uploads Section */}
-      <section className="space-y-4 pt-6 border-t border-white/5">
-        <div className="flex items-center justify-between px-3 sm:px-0">
-          <div>
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <Clock className="w-5 h-5 text-zinc-300" />
-              Latest Uploads
-            </h2>
-            <p className="text-xs text-zinc-400">Freshly transcoded and published community videos</p>
-          </div>
-          <Link to="/latest" className="text-xs font-medium text-amber-400 hover:text-amber-300 flex items-center gap-1">
-            View All <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
-        </div>
-
         <VideoGrid
           videos={latestVideos}
           isLoading={isLoading}
@@ -272,36 +206,6 @@ export const HomePage: React.FC = () => {
           onOpenShare={setShareVideo}
         />
       </section>
-
-      {/* Trust & Safety Assurance Banner */}
-      <div className="p-6 rounded-2xl bg-gradient mx-3 sm:mx-0-to-r from-[#0d0d0d] via-[#090909] to-[#050505] border border-white/5 flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-            <ShieldCheck className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="font-semibold text-sm text-white">Lawful & Consensual Video Platform</h3>
-            <p className="text-xs text-zinc-400 mt-1 max-w-xl leading-relaxed">
-              cornmm enforces rigorous intellectual property protections, anti-piracy controls, and zero tolerance for non-consensual imagery. All uploads undergo Bunny transcoding and moderation review.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 shrink-0">
-          <Link
-            to="/guidelines"
-            className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#161616] hover:bg-[#202020] border border-white/10 text-zinc-200 transition-colors"
-          >
-            Guidelines
-          </Link>
-          <Link
-            to="/dmca"
-            className="px-4 py-2 rounded-lg text-xs font-semibold bg-[#161616] hover:bg-[#202020] border border-white/10 text-zinc-200 transition-colors"
-          >
-            DMCA Policy
-          </Link>
-        </div>
-      </div>
 
       {/* Modals */}
       <ReportModal

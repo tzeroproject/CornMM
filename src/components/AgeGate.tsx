@@ -6,7 +6,7 @@ export const AgeGate: React.FC = () => {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const accepted = localStorage.getItem('cornmm_age_verified');
+    const accepted = localStorage.getItem('StreamSphere_age_verified');
     if (!accepted) {
       setIsAccepted(false);
     }
@@ -14,7 +14,7 @@ export const AgeGate: React.FC = () => {
   }, []);
 
   const handleAccept = () => {
-    localStorage.setItem('cornmm_age_verified', 'true');
+    localStorage.setItem('StreamSphere_age_verified', 'true');
     setIsAccepted(true);
   };
 
@@ -33,7 +33,7 @@ export const AgeGate: React.FC = () => {
           </div>
           <h2 className="text-2xl font-bold text-white mb-3">Age Verification Required</h2>
           <p className="text-sm text-zinc-400 mb-6 leading-relaxed">
-            This website (cornmm) contains content that is only suitable for adults. You must be at least 18 years old to enter. By clicking "I am 18 or older", you confirm your age and agree to our Terms of Service.
+            This website (StreamSphere) contains content that is only suitable for adults. You must be at least 18 years old to enter. By clicking "I am 18 or older", you confirm your age and agree to our Terms of Service.
           </p>
           <div className="space-y-3">
             <button

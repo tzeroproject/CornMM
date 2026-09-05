@@ -10,8 +10,8 @@ export const AppLayout: React.FC = () => {
 
   return (
     <>
-      <AgeGate />
-      <div className="min-h-screen bg-[#050505] text-zinc-300 flex flex-col selection:bg-amber-500/25 selection:text-amber-200 font-sans">
+      
+      <div className="min-h-screen w-full bg-[#050505] text-zinc-300 flex flex-col selection:bg-amber-500/25 selection:text-amber-200 font-sans">
       <Navbar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
       
       <div className="flex-1 flex">

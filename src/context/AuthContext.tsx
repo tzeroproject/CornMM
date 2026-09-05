@@ -3,24 +3,7 @@ import { Profile } from '../types';
 import { supabase, isSupabaseConfigured, isSchemaReady, handleSupabaseError } from '../lib/supabase';
 import { useNotification } from './NotificationContext';
 
-export const CADMIN_ACCOUNT = {
-  username: 'Cadmin',
-  email: 'cadmin@streamsphere.tv',
-  password: 'Cadmin@123',
-  profile: {
-    id: '00000000-0000-0000-0000-000000000001',
-    username: 'Cadmin',
-    display_name: 'corn admin',
-    avatar_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-    role: 'admin' as const,
-    is_verified: true,
-    is_suspended: false,
-    subscriber_count: 52400,
-    total_views: 1250000,
-    bio: 'Platform System Administrator & Content Moderation Lead. Full RBAC clearance.',
-    created_at: '2024-01-01T00:00:00Z',
-  },
-};
+
 
 interface AuthContextType {
   user: Profile | null;
@@ -135,30 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       let cleanIdentifier = identifier.trim().toLowerCase();
 
-      // Map 'cadmin' to the actual email for Supabase auth
-      if (
-        cleanIdentifier === 'cadmin' ||
-        cleanIdentifier === 'cadmin@streamsphere.tv' ||
-        cleanIdentifier === 'cadmin@admin.com'
-      ) {
-        cleanIdentifier = 'cadmin@streamsphere.tv';
-        // If Supabase is NOT configured, allow bypass. Otherwise, fall through to Supabase auth
-        if (!isSupabaseConfigured) {
-          if (pass === CADMIN_ACCOUNT.password) {
-            setUser(CADMIN_ACCOUNT.profile);
-            localStorage.setItem('streamsphere_production_user_v2', JSON.stringify(CADMIN_ACCOUNT.profile));
-            showToast({
-              type: 'success',
-              title: 'Administrator Access Granted',
-              message: 'Signed in as Administrator Cadmin. Full moderation clearance active.',
-            });
-            return true;
-          } else {
-            showToast({ type: 'error', title: 'Authentication Failed', message: 'Incorrect password.' });
-            return false;
-          }
-        }
-      }
+
 
       if (isSupabaseConfigured) {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -200,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               subscriber_count: 0,
               total_views: 0,
               avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanIdentifier}`,
-              bio: 'Creator on cornmm',
+              bio: 'Creator on StreamSphere',
               created_at: new Date().toISOString(),
             };
           }
@@ -217,7 +177,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             subscriber_count: 0,
             total_views: 0,
             avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanIdentifier}`,
-            bio: 'Creator on cornmm',
+            bio: 'Creator on StreamSphere',
             created_at: new Date().toISOString(),
           };
         }
@@ -268,7 +228,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           if (data.session) {
             await fetchSupabaseProfile(data.user.id);
-            showToast({ type: 'success', title: 'Account Created', message: 'Welcome to cornmm!' });
+            showToast({ type: 'success', title: 'Account Created', message: 'Welcome to StreamSphere!' });
           } else {
             showToast({
               type: 'info',
@@ -289,7 +249,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           subscriber_count: 0,
           total_views: 0,
           avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${cleanUsername}`,
-          bio: 'Creator on cornmm',
+          bio: 'Creator on StreamSphere',
           created_at: new Date().toISOString(),
         };
 
@@ -306,7 +266,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setUser(newProfile);
         localStorage.setItem('streamsphere_production_user_v2', JSON.stringify(newProfile));
-        showToast({ type: 'success', title: 'Account Created', message: `Welcome to cornmm, ${cleanDisplayName}!` });
+        showToast({ type: 'success', title: 'Account Created', message: `Welcome to StreamSphere, ${cleanDisplayName}!` });
         return true;
       }
       return false;
@@ -355,7 +315,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         isLoading,
-        isAdmin: user?.role === 'admin' || user?.role === 'moderator',
+        isAdmin: Boolean(user?.role === 'admin' || user?.role === 'moderator'),
         isCreator: user?.role === 'creator' || user?.role === 'admin',
         isAuthenticated: Boolean(user),
         isAgeVerified,

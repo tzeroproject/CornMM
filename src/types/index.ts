@@ -1,4 +1,4 @@
-// Data types for cornmm Video Platform
+// Data types for StreamSphere Video Platform
 
 export type UserRole = 'user' | 'creator' | 'moderator' | 'admin';
 
