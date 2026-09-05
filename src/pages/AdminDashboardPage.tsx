@@ -35,7 +35,8 @@ export const AdminDashboardPage: React.FC = () => {
     totalViews: 0,
     totalUsers: 0,
   });
-    const [reports, setReports] = useState<Report[]>([]);
+    const [pendingVideos, setPendingVideos] = useState<Video[]>([]);
+  const [reports, setReports] = useState<Report[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -49,12 +50,12 @@ export const AdminDashboardPage: React.FC = () => {
       // Reload stats
       const [st, pv, rep, al] = await Promise.all([
         adminService.getStats(),
-        
+        adminService.getPendingVideos(),
         adminService.getReports(),
         adminService.getAuditLogs(),
       ]);
       setStats(st);
-      
+      setPendingVideos(pv);
       setReports(rep);
       setAuditLogs(al);
     } catch (err: any) {
@@ -75,12 +76,12 @@ export const AdminDashboardPage: React.FC = () => {
       try {
         const [st, pv, rep, logs] = await Promise.all([
           adminService.getDashboardStats(),
-          
+          adminService.getPendingVideos(),
           adminService.getReports(),
           adminService.getAuditLogs(),
         ]);
         setStats(st);
-        
+        setPendingVideos(pv);
         setReports(rep);
         setAuditLogs(logs);
         await loadBunnyVideos();
@@ -415,7 +416,7 @@ export const AdminDashboardPage: React.FC = () => {
         </div>
       )}
 
-      {/* Tab 2: User Reports Queue */
+      {/* Tab 2: User Reports Queue */}
       {activeTab === 'reports' && (
         <div className="space-y-4">
           <h3 className="text-sm font-bold text-white">

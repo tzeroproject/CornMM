@@ -45,7 +45,7 @@ export const adminService = {
       if (!res.ok) throw new Error(data.error || 'Failed to sync from Bunny');
       
       const adminId = typeof adminProfileOrId === 'string' ? adminProfileOrId : adminProfileOrId.id;
-      await this.logAction({
+      await this.logAdminAction({
         adminId,
         action: 'bunny_sync',
         targetType: 'system',
