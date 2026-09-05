@@ -10,48 +10,60 @@ if (start === -1 || end === -1) {
   throw new Error("Could not locate Lulu upload route in server.ts");
 }
 
-const replacement = `app.post(
+const replacement = `app.put(
   "/api/lulu/upload",
-  upload.single("file"),
+  express.raw({ type: "*/*", limit: "2gb" }),
   async (req, res) => {
-    let tempPath = "";
-
     try {
       const key = String(process.env.LULU_API_KEY || "").trim();
-      if (!key) return res.status(500).json({ error: "LULU_API_KEY is missing" });
-      if (!req.file) return res.status(400).json({ error: "No video file received" });
+      if (!key) {
+        return res.status(500).json({ error: "LULU_API_KEY is missing" });
+      }
 
-      tempPath = req.file.path;
-      const title = String(req.body.file_title || req.body.title || req.query.title || req.file.originalname || "Untitled Video");
-      const description = String(req.body.file_descr || req.body.description || "");
+      const title = String(req.query.title || "Untitled Video");
+      const fileBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
+      if (!fileBuffer.length) {
+        return res.status(400).json({ error: "No video data received" });
+      }
 
       const lookup = await fetch(
         \`https://lulustream.com/api/upload/server?key=\${encodeURIComponent(key)}\`,
-        { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(30000) }
+        {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(30000)
+        }
       );
 
       const lookupText = await lookup.text();
       let lookupData;
-      try { lookupData = JSON.parse(lookupText); }
-      catch {
-        return res.status(502).json({ error: "Lulu upload-server lookup returned invalid JSON", status: lookup.status, details: lookupText.slice(0, 2000) });
+      try {
+        lookupData = JSON.parse(lookupText);
+      } catch {
+        return res.status(502).json({
+          error: "Lulu upload-server lookup returned invalid JSON",
+          status: lookup.status,
+          details: lookupText.slice(0, 3000)
+        });
       }
 
       if (!lookup.ok || Number(lookupData.status) !== 200 || !lookupData.result) {
-        return res.status(502).json({ error: "Failed to get Lulu upload server", status: lookup.status, details: lookupData.msg || lookupText.slice(0, 2000) });
+        return res.status(502).json({
+          error: "Failed to get Lulu upload server",
+          status: lookup.status,
+          message: lookupData.msg,
+          details: JSON.stringify(lookupData).slice(0, 3000)
+        });
       }
 
       const form = new FormData();
       form.append("key", key);
       form.append("file_title", title);
-      if (description) form.append("file_descr", description);
       form.append("file_public", "1");
       form.append("file_adult", "1");
       form.append("html_redirect", "0");
-      form.append("file", fs.createReadStream(tempPath), {
-        filename: req.file.originalname || "upload.mp4",
-        contentType: req.file.mimetype || "application/octet-stream",
-        knownLength: req.file.size
+      form.append("file", fileBuffer, {
+        filename: "upload.mp4",
+        contentType: String(req.headers["content-type"] || "video/mp4")
       });
 
       const headers = form.getHeaders();
@@ -69,62 +81,92 @@ const replacement = `app.post(
           method: "POST",
           headers,
           timeout: 30 * 60 * 1000
-        }, (response) => {
+        }, response => {
           const status = response.statusCode || 500;
           let body = "";
           response.setEncoding("utf8");
           response.on("data", chunk => { body += chunk; });
           response.on("end", () => {
             let parsed;
-            try { parsed = JSON.parse(body); }
-            catch {
-              reject(new Error(\`Lulu upload returned non-JSON HTTP \${status}: \${body.slice(0, 3000)}\`));
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              reject(new Error(
+                \`Lulu upload returned non-JSON HTTP \${status}: \${body.slice(0, 5000)}\`
+              ));
               return;
             }
+
             if (status < 200 || status >= 300) {
-              reject(new Error(\`Lulu upload HTTP \${status}: \${JSON.stringify(parsed).slice(0, 3000)}\`));
+              reject(new Error(
+                \`Lulu upload HTTP \${status}: \${JSON.stringify(parsed).slice(0, 5000)}\`
+              ));
               return;
             }
+
             resolve(parsed);
           });
         });
 
-        request.on("timeout", () => request.destroy(new Error("Lulu upload timed out after 30 minutes")));
+        request.on("timeout", () => {
+          request.destroy(new Error("Lulu upload timed out after 30 minutes"));
+        });
         request.on("error", reject);
         form.pipe(request);
       });
 
-      const entries = Array.isArray(uploadData?.files) ? uploadData.files : [];
-      const entry = entries.find(item => item && (item.filecode || item.fileCode)) ||
-        uploadData?.result?.files?.[0] ||
-        uploadData?.result ||
-        uploadData?.file ||
-        uploadData;
+      // Lulu documentation normally returns files[].filecode, but tolerate
+      // equivalent nesting/casing so a valid upload is not rejected.
+      function findFileCode(value, depth = 0) {
+        if (!value || depth > 8) return null;
 
-      const fileCode = entry?.filecode || entry?.fileCode || entry?.file_code || uploadData?.filecode || uploadData?.fileCode;
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            const found = findFileCode(item, depth + 1);
+            if (found) return found;
+          }
+          return null;
+        }
+
+        if (typeof value !== "object") return null;
+
+        for (const key of ["filecode", "fileCode", "file_code"]) {
+          if (value[key] !== undefined && value[key] !== null && String(value[key]).trim()) {
+            return String(value[key]).trim();
+          }
+        }
+
+        for (const key of Object.keys(value)) {
+          const found = findFileCode(value[key], depth + 1);
+          if (found) return found;
+        }
+
+        return null;
+      }
+
+      const fileCode = findFileCode(uploadData);
 
       if (!fileCode) {
+        console.error("Lulu upload response:", JSON.stringify(uploadData).slice(0, 10000));
         return res.status(502).json({
           error: "Lulu returned an unexpected upload response",
-          status: uploadData?.status,
-          message: uploadData?.msg,
-          details: JSON.stringify(uploadData).slice(0, 5000)
+          luluStatus: uploadData?.status,
+          luluMessage: uploadData?.msg,
+          details: JSON.stringify(uploadData).slice(0, 10000)
         });
       }
 
-      const normalizedCode = String(fileCode);
       return res.json({
         success: true,
-        fileCode: normalizedCode,
-        embedUrl: \`https://lulustream.com/e/\${normalizedCode}\`
+        fileCode,
+        embedUrl: \`https://lulustream.com/e/\${fileCode}\`
       });
     } catch (error) {
       console.error("Lulu upload error:", error);
-      return res.status(502).json({ error: "Lulu upload failed", details: error?.message || String(error) });
-    } finally {
-      if (tempPath) {
-        try { fs.unlinkSync(tempPath); } catch {}
-      }
+      return res.status(502).json({
+        error: "Lulu upload failed",
+        details: error?.message || String(error)
+      });
     }
   }
 );
