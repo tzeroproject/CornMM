@@ -194,7 +194,7 @@ ${video.thumbnail_url ? `<meta property="og:image" content="${esc(video.thumbnai
 <meta name="twitter:description" content="${esc(description)}" />
 ${video.thumbnail_url ? `<meta name="twitter:image" content="${esc(video.thumbnail_url)}" />` : ""}
 <script id="cornmm-video-schema" type="application/ld+json">${JSON.stringify(schema).replace(/</g, "\\u003c")}</script>`;
-    res.type("html").send(html.replace(/<title>[\\s\\S]*?<\\/title>/i, "").replace("</head>", head + "\n  </head>"));
+    res.type("html").send(html.replace(/<title>[\s\S]*?<\/title>/i, "").replace("</head>", head + "\n  </head>"));
   } catch {
     next();
   }
