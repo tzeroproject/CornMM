@@ -45,9 +45,12 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
 
   useEffect(() => {
     const el = previewRef.current;
-    if (!el || !video.video_url) return;
+    const source = video.video_url;
+    if (!el || !source) return;
 
     let observer: IntersectionObserver | null = null;
+    let hls: { destroy: () => void } | null = null;
+    let cancelled = false;
 
     const stopPreview = () => {
       if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
@@ -63,8 +66,48 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
         await el.play();
         stopTimerRef.current = setTimeout(stopPreview, 3000);
       } catch {
-        // Browser may block autoplay; the thumbnail remains available as fallback.
+        // Browser may block autoplay; thumbnail remains underneath as fallback.
       }
+    };
+
+    const setupSource = async () => {
+      const isHls = /\.m3u8(?:$|\?)/i.test(source);
+
+      if (isHls) {
+        // Safari/iOS can play HLS natively.
+        if (el.canPlayType('application/vnd.apple.mpegurl')) {
+          el.src = source;
+        } else {
+          // Chrome/Firefox need hls.js for an HLS video_url.
+          try {
+            const { default: Hls } = await import('hls.js');
+            if (cancelled) return;
+            if (Hls.isSupported()) {
+              const instance = new Hls({
+                maxBufferLength: 6,
+                backBufferLength: 3,
+                fragLoadingMaxRetry: 2,
+                manifestLoadingMaxRetry: 2,
+                levelLoadingMaxRetry: 2,
+              });
+              hls = instance;
+              instance.loadSource(source);
+              instance.attachMedia(el);
+              instance.on(Hls.Events.MANIFEST_PARSED, () => {
+                if (!cancelled) startPreview();
+              });
+              return;
+            }
+          } catch {
+            // Keep thumbnail visible if HLS setup fails.
+          }
+        }
+      } else {
+        // Direct MP4/WebM/etc. video_url works without preview_animation_url.
+        el.src = source;
+      }
+
+      if (!cancelled) startPreview();
     };
 
     if ('IntersectionObserver' in window) {
@@ -78,13 +121,19 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
         { threshold: 0.6 }
       );
       observer.observe(el);
-    } else {
-      startPreview();
     }
 
+    setupSource();
+
     return () => {
+      cancelled = true;
       observer?.disconnect();
+      if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
       stopPreview();
+      hls?.destroy();
+      el.removeAttribute('src');
+      el.load();
     };
   }, [video.video_url]);
 
@@ -107,7 +156,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
 
   return (
     <div className="group relative flex flex-col rounded-xl sm:rounded-2xl bg-[#0a0a0a] border border-white/5 hover:border-white/15 transition-all duration-300 overflow-hidden hover:shadow-xl hover:shadow-black">
-      {/* 3-second muted video preview. Falls back to the thumbnail if autoplay/stream playback is unavailable. */}
+      {/* 3-second muted video preview using video_url; preview_animation_url is not required. */}
       <Link to={`/watch/${video.slug || video.id}`} className="relative aspect-video w-full overflow-hidden bg-[#050505]">
         <img
           src={video.thumbnail_url}
@@ -117,7 +166,6 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
         />
         <video
           ref={previewRef}
-          src={video.preview_animation_url || video.video_url}
           muted
           playsInline
           preload="metadata"
