@@ -5,17 +5,16 @@ export interface BunnyPlayerConfig { libraryId: string; videoId: string; cdnHost
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
-  if (!token) throw new Error('Please sign in before uploading a video.');
-  return { Authorization: `Bearer ${token}` };
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export function getBunnyIframeUrl({ libraryId, videoId, autoplay = false }: { libraryId?: string; videoId: string; autoplay?: boolean }): string {
   const lib = libraryId || 'demo-lib';
   return `https://iframe.mediadelivery.net/embed/${lib}/${videoId}?autoplay=${autoplay}&preload=true&responsive=true`;
 }
-export function getBunnyHlsUrl(videoId: string, cdnHostname?: string): string { return `https://${cdnHostname || 'vz-cdn.bunnycdn.net'}/${videoId}/playlist.m3u8`; }
-export function getBunnyThumbnailUrl(videoId: string, cdnHostname?: string): string { return `https://${cdnHostname || 'vz-cdn.bunnycdn.net'}/${videoId}/thumbnail.jpg`; }
-export function getBunnyPreviewUrl(videoId: string, cdnHostname?: string): string { return `https://${cdnHostname || 'vz-cdn.bunnycdn.net'}/${videoId}/preview.webp`; }
+export function getBunnyHlsUrl(libraryId: string, videoId: string): string { return `https://iframe.mediadelivery.net/play/${libraryId}/${videoId}`; }
+export function getBunnyThumbnailUrl(libraryId: string, videoId: string): string { return `https://vz-${libraryId}.b-cdn.net/${videoId}/thumbnail.jpg`; }
+export function getBunnyPreviewUrl(libraryId: string, videoId: string): string { return `https://vz-${libraryId}.b-cdn.net/${videoId}/preview.webp`; }
 
 export interface BunnyUploadInitResult { success: boolean; videoId: string; libraryId: string; uploadUrl: string; proxyUploadUrl?: string; cdnHostname?: string; isSimulated?: boolean; }
 export interface BunnyUploadError extends Error { guidance?: string; details?: string; statusCode?: number; allowFallback?: boolean; }
@@ -23,13 +22,16 @@ export interface BunnyUploadError extends Error { guidance?: string; details?: s
 export async function initBunnyVideoUpload(title: string, _forceFallback = false): Promise<BunnyUploadInitResult> {
   const auth = await authHeaders();
   const res = await fetch('/api/bunny/create-video', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'Cache-Control': 'no-cache', ...auth },
-    body: JSON.stringify({ title, forceFallback: false }), cache: 'no-store',
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'Cache-Control': 'no-cache', ...auth },
+    body: JSON.stringify({ title, forceFallback: false }),
+    cache: 'no-store',
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.error || `Bunny Stream initialization failed (${res.status})`) as BunnyUploadError;
-    err.guidance = data.guidance; err.details = data.details; err.statusCode = data.statusCode || res.status; err.allowFallback = false; throw err;
+    err.guidance = data.guidance; err.details = data.details; err.statusCode = data.statusCode || res.status; err.allowFallback = false;
+    throw err;
   }
   if (!data.videoId || !data.libraryId || !data.proxyUploadUrl) {
     const err = new Error('Bunny Stream returned an incomplete upload configuration.') as BunnyUploadError;
@@ -38,19 +40,21 @@ export async function initBunnyVideoUpload(title: string, _forceFallback = false
   return data as BunnyUploadInitResult;
 }
 
-export async function uploadVideoBinary({ file, uploadUrl, proxyUploadUrl, onProgress }: { file: File; uploadUrl: string; proxyUploadUrl?: string; onProgress?: (percent: number) => void }): Promise<void> {
+export async function uploadVideoBinary(proxyUploadUrl: string, file: File, onProgress?: (percent: number) => void): Promise<void> {
   const auth = await authHeaders();
   return new Promise((resolve, reject) => {
-    const targetUrl = proxyUploadUrl || uploadUrl;
     const xhr = new XMLHttpRequest();
-    xhr.open('PUT', targetUrl);
+    xhr.open('PUT', proxyUploadUrl);
     xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
     xhr.setRequestHeader('Accept', 'application/json');
-    xhr.setRequestHeader('Authorization', auth.Authorization);
-    xhr.upload.onprogress = event => { if (event.lengthComputable && onProgress) onProgress(Math.round((event.loaded / event.total) * 100)); };
+    if (auth.Authorization) xhr.setRequestHeader('Authorization', auth.Authorization);
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable && onProgress) onProgress(Math.round((event.loaded / event.total) * 100));
+    };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) return resolve();
-      let msg = ''; try { const body = JSON.parse(xhr.responseText || '{}'); msg = body.details || body.error || ''; } catch { msg = xhr.responseText || ''; }
+      let msg = '';
+      try { const body = JSON.parse(xhr.responseText || '{}'); msg = body.details || body.error || ''; } catch { msg = xhr.responseText || ''; }
       reject(new Error(msg ? `Bunny upload failed (${xhr.status}): ${msg}` : `Bunny upload failed with status code ${xhr.status}`));
     };
     xhr.onerror = () => reject(new Error('Network error during video upload. Check the API deployment and try again.'));
