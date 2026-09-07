@@ -4,7 +4,6 @@ import FormData from "form-data";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
-import { createServer as createViteServer } from "vite";
 import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
@@ -21,9 +20,10 @@ const supabaseAdmin = hasValidSupabase ? createClient(supabaseUrl, supabaseServi
 function bunnyConfig() { return { apiKey: String(process.env.BUNNY_API_KEY || "").trim().replace(/^["']|["']$/g, ""), libraryId: String(process.env.BUNNY_LIBRARY_ID || "").trim().replace(/^["']|["']$/g, ""), hostname: String(process.env.BUNNY_CDN_HOSTNAME || "").trim().replace(/^["']|["']$/g, "") }; }
 function bearerToken(req: any): string | null { const auth = String(req.headers.authorization || ""); const match = auth.match(/^Bearer\s+(.+)$/i); return match ? match[1].trim() : null; }
 async function requireUser(req: any, res: any): Promise<any | null> { const token = bearerToken(req); if (!token || !supabaseAdmin) { res.status(401).json({ error: "Authentication required" }); return null; } const { data, error } = await supabaseAdmin.auth.getUser(token); if (error || !data.user) { res.status(401).json({ error: "Invalid authentication token" }); return null; } return data.user; }
+async function optionalUser(req: any): Promise<any | null> { const token = bearerToken(req); if (!token || !supabaseAdmin) return null; try { const { data } = await supabaseAdmin.auth.getUser(token); return data.user || null; } catch { return null; } }
 async function requireAdmin(req: any, res: any): Promise<string | null> { const user = await requireUser(req, res); if (!user) return null; const { data: profile, error } = await supabaseAdmin!.from("profiles").select("role").eq("id", user.id).single(); if (error || !profile || profile.role !== "admin") { res.status(403).json({ error: "Admin access required" }); return null; } return user.id; }
 
-app.get("/api/health", (_req, res) => { const bunny = bunnyConfig(); res.json({ status: "ok", supabase: hasValidSupabase, bunny: Boolean(bunny.apiKey && bunny.libraryId && bunny.hostname), lulu: Boolean(String(process.env.LULU_API_KEY || "").trim()), time: new Date().toISOString() }); });
+app.get("/api/health", (_req, res) => { const bunny = bunnyConfig(); res.json({ status: "ok", supabase: hasValidSupabase, bunny: Boolean(bunny.apiKey && bunny.libraryId && bunny.hostname), time: new Date().toISOString() }); });
 
 const VIDEO_SELECT = "*, category:categories(*), creator:profiles(*)";
 function videoQuery(req: any) {
@@ -42,7 +42,7 @@ function videoQuery(req: any) {
 }
 app.get("/api/videos", async (req, res) => { if (!supabaseAdmin) return res.status(500).json({ error: "Supabase server configuration missing" }); try { const { data, count, error } = await videoQuery(req); if (error) return res.status(400).json({ error: error.message, code: error.code }); res.json({ videos: data || [], total: count || 0 }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to load videos" }); } });
 app.get("/api/videos/:id", async (req, res, next) => { if (req.params.id === "view") return next(); if (!supabaseAdmin) return res.status(500).json({ error: "Supabase server configuration missing" }); try { const id = String(req.params.id); const q = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? supabaseAdmin.from("videos").select(VIDEO_SELECT).or(`id.eq.${id},slug.eq.${id}`).maybeSingle() : supabaseAdmin.from("videos").select(VIDEO_SELECT).eq("slug", id).maybeSingle(); const { data, error } = await q; if (error) return res.status(400).json({ error: error.message, code: error.code }); if (!data) return res.status(404).json({ error: "Video not found" }); res.json({ video: data }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to load video" }); } });
-app.post("/api/videos", async (req, res) => { const user = await requireUser(req, res); if (!user || !supabaseAdmin) return; try { const v = req.body || {}; const slug = String(v.slug || `${String(v.title || "untitled").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}-${Math.random().toString(36).slice(2, 7)}`); const row = { ...v, slug, creator_id: v.creator_id || user.id, id: v.id || undefined }; delete row.category; delete row.creator; const { data, error } = await supabaseAdmin.from("videos").insert(row).select(VIDEO_SELECT).single(); if (error) return res.status(400).json({ error: error.message, code: error.code }); res.status(201).json({ video: data }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to create video" }); } });
+app.post("/api/videos", async (req, res) => { if (!supabaseAdmin) return res.status(500).json({ error: "Supabase server configuration missing" }); const user = await optionalUser(req); try { const v = req.body || {}; const slug = String(v.slug || `${String(v.title || "untitled").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}-${Math.random().toString(36).slice(2, 7)}`); const row: any = { ...v, slug, id: v.id || undefined }; row.creator_id = user?.id || null; delete row.category; delete row.creator; const { data, error } = await supabaseAdmin.from("videos").insert(row).select(VIDEO_SELECT).single(); if (error) return res.status(400).json({ error: error.message, code: error.code }); res.status(201).json({ video: data }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to create video" }); } });
 app.patch("/api/videos/:id", async (req, res, next) => { if (req.params.id === "view") return next(); const user = await requireUser(req, res); if (!user || !supabaseAdmin) return; try { const updates = { ...(req.body || {}), updated_at: new Date().toISOString() }; delete (updates as any).id; delete (updates as any).category; delete (updates as any).creator; const { data, error } = await supabaseAdmin.from("videos").update(updates).eq("id", req.params.id).select(VIDEO_SELECT).single(); if (error) return res.status(400).json({ error: error.message, code: error.code }); res.json({ video: data }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to update video" }); } });
 app.delete("/api/videos/:id", async (req, res, next) => { if (req.params.id === "view") return next(); const user = await requireUser(req, res); if (!user || !supabaseAdmin) return; try { const { error } = await supabaseAdmin.from("videos").delete().eq("id", req.params.id); if (error) return res.status(400).json({ error: error.message, code: error.code }); res.json({ success: true }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to delete video" }); } });
 app.get("/api/categories", async (_req, res) => { if (!supabaseAdmin) return res.status(500).json({ error: "Supabase server configuration missing" }); try { const { data, error } = await supabaseAdmin.from("categories").select("*").order("name"); if (error) return res.status(400).json({ error: error.message }); res.json({ categories: data || [] }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to load categories" }); } });
@@ -64,97 +64,11 @@ app.get("/api/interactions/comments/:videoId", async (req, res) => { if (!supaba
 app.post("/api/interactions/comments/:videoId", async (req, res) => { const u = await interactionUser(req, res); if (!u || !supabaseAdmin) return; const { content, parentId } = req.body || {}; const { data, error } = await supabaseAdmin.from("comments").insert({ video_id: req.params.videoId, user_id: u.id, content, parent_id: parentId || null }).select("*, user:profiles(*)").single(); if (error) return res.status(400).json({ error: error.message }); const { data: v } = await supabaseAdmin.from("videos").select("comments_count").eq("id", req.params.videoId).single(); await supabaseAdmin.from("videos").update({ comments_count: Number(v?.comments_count || 0) + 1 }).eq("id", req.params.videoId); res.status(201).json({ comment: data }); });
 app.post("/api/interactions/reports", async (req, res) => { const u = await interactionUser(req, res); if (!u || !supabaseAdmin) return; const { videoId, reason, description } = req.body || {}; const { data, error } = await supabaseAdmin.from("reports").insert({ reporter_id: u.id, video_id: videoId, reason, description, status: "pending" }).select("*, video:videos(*), reporter:profiles!reporter_id(*)").single(); if (error) return res.status(400).json({ error: error.message }); res.status(201).json({ report: data }); });
 
-app.post("/api/bunny/create-video", async (req, res) => { const user = await requireUser(req, res); if (!user) return; try { const bunny = bunnyConfig(); if (!bunny.apiKey || !bunny.libraryId) return res.status(500).json({ error: "Missing Bunny configuration" }); const title = String(req.body?.title || "Untitled Video").trim().slice(0, 300) || "Untitled Video"; const collectionId = req.body?.collectionId ? String(req.body.collectionId) : undefined; const response = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos`, { method: "POST", headers: { AccessKey: bunny.apiKey, "Content-Type": "application/json" }, body: JSON.stringify({ title, ...(collectionId ? { collectionId } : {}) }) }); const text = await response.text(); let data: any = {}; try { data = JSON.parse(text); } catch {} if (!response.ok || !data.guid) return res.status(response.status || 502).json({ error: "Bunny create video failed", details: text.slice(0, 5000) }); if (supabaseAdmin) await supabaseAdmin.from("videos").insert({ bunny_video_id: data.guid, title, slug: `${data.guid}-${Date.now()}`, creator_id: user.id, visibility: "public", moderation_status: "published", processing_status: "processing" }); res.json({ success: true, videoId: data.guid, libraryId: bunny.libraryId, uploadUrl: `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${data.guid}`, proxyUploadUrl: `/api/bunny/upload/${data.guid}`, cdnHostname: bunny.hostname }); } catch (e: any) { res.status(500).json({ error: e?.message || "Bunny create video failed" }); } });
-app.put("/api/bunny/upload/:videoId", async (req, res) => { const user = await requireUser(req, res); if (!user) return; try { const bunny = bunnyConfig(); const id = String(req.params.videoId); const response = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${encodeURIComponent(id)}`, { method: "PUT", headers: { AccessKey: bunny.apiKey, "Content-Type": req.headers["content-type"] || "application/octet-stream" }, body: req as any, duplex: "half" as any }); if (!response.ok) return res.status(response.status).json({ error: "Bunny upload failed", details: (await response.text()).slice(0, 5000) }); res.json({ success: true, videoId: id }); } catch (e: any) { res.status(500).json({ error: e?.message || "Bunny upload failed" }); } });
-app.get("/api/bunny/status/:videoId", async (req, res) => { const user = await requireUser(req, res); if (!user) return; try { const bunny = bunnyConfig(); const response = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${encodeURIComponent(req.params.videoId)}`, { headers: { AccessKey: bunny.apiKey, Accept: "application/json" } }); if (!response.ok) return res.status(response.status).json({ error: "Unable to get Bunny status" }); const data: any = await response.json(); const statusMap: Record<number, string> = { 0:"created",1:"uploaded",2:"processing",3:"transcoding",4:"finished",5:"error",6:"failed" }; res.json({ videoId:req.params.videoId,status:data.status,statusText:statusMap[data.status]||"unknown",progress:data.encodeProgress||0,duration:data.length||0 }); } catch(e:any) { res.status(500).json({error:e?.message||"Bunny status failed"}); } });
+app.post("/api/bunny/create-video", async (req, res) => { try { const bunny = bunnyConfig(); if (!bunny.apiKey || !bunny.libraryId) return res.status(500).json({ error: "Missing Bunny configuration" }); const user = await optionalUser(req); const title = String(req.body?.title || "Untitled Video").trim().slice(0, 300) || "Untitled Video"; const collectionId = req.body?.collectionId ? String(req.body.collectionId) : undefined; const response = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos`, { method: "POST", headers: { AccessKey: bunny.apiKey, "Content-Type": "application/json" }, body: JSON.stringify({ title, ...(collectionId ? { collectionId } : {}) }) }); const text = await response.text(); let data: any = {}; try { data = JSON.parse(text); } catch {} if (!response.ok || !data.guid) return res.status(response.status || 502).json({ error: "Bunny create video failed", details: text.slice(0, 5000) }); if (supabaseAdmin) { const row: any = { bunny_video_id: data.guid, title, slug: `${data.guid}-${Date.now()}`, creator_id: user?.id || null, visibility: "public", moderation_status: "published", processing_status: "processing" }; await supabaseAdmin.from("videos").insert(row); } res.json({ success: true, videoId: data.guid, libraryId: bunny.libraryId, uploadUrl: `https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${data.guid}`, proxyUploadUrl: `/api/bunny/upload/${data.guid}`, cdnHostname: bunny.hostname }); } catch (e: any) { res.status(500).json({ error: e?.message || "Bunny create video failed" }); } });
+app.put("/api/bunny/upload/:videoId", async (req, res) => { try { const bunny = bunnyConfig(); if (!bunny.apiKey || !bunny.libraryId) return res.status(500).json({ error: "Missing Bunny configuration" }); const id = String(req.params.videoId); const response = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${encodeURIComponent(id)}`, { method: "PUT", headers: { AccessKey: bunny.apiKey, "Content-Type": req.headers["content-type"] || "application/octet-stream" }, body: req as any, duplex: "half" as any }); if (!response.ok) return res.status(response.status).json({ error: "Bunny upload failed", details: (await response.text()).slice(0, 5000) }); res.json({ success: true, videoId: id }); } catch (e: any) { res.status(500).json({ error: e?.message || "Bunny upload failed" }); } });
+app.get("/api/bunny/status/:videoId", async (req, res) => { try { const bunny = bunnyConfig(); if (!bunny.apiKey || !bunny.libraryId) return res.status(500).json({ error: "Missing Bunny configuration" }); const response = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${encodeURIComponent(req.params.videoId)}`, { headers: { AccessKey: bunny.apiKey, Accept: "application/json" } }); if (!response.ok) return res.status(response.status).json({ error: "Unable to get Bunny status" }); const data: any = await response.json(); const statusMap: Record<number, string> = { 0:"created",1:"uploaded",2:"processing",3:"transcoding",4:"finished",5:"error",6:"failed" }; res.json({ videoId:req.params.videoId,status:data.status,statusText:statusMap[data.status]||"unknown",progress:data.encodeProgress||0,duration:data.length||0 }); } catch(e:any) { res.status(500).json({error:e?.message||"Bunny status failed"}); } });
 
-async function handleLuluUpload(req: any, res: any) { const adminId = await requireAdmin(req,res); if(!adminId)return; let tempPath=""; try { const key=String(process.env.LULU_API_KEY||"").trim(); if(!key)return res.status(500).json({error:"LuluStream is not configured"}); if(!req.file)return res.status(400).json({error:"No video file received"}); tempPath=req.file.path; const title=String(req.body?.file_title||req.body?.title||req.file.originalname||"Untitled Video").slice(0,300); const lookup=await fetch(`https://lulustream.com/api/upload/server?key=${encodeURIComponent(key)}`,{headers:{Accept:"application/json"},signal:AbortSignal.timeout(30000)}); const lookupText=await lookup.text(); let lookupData:any; try{lookupData=JSON.parse(lookupText)}catch{return res.status(502).json({error:"Lulu upload-server returned invalid JSON"})} if(!lookup.ok||Number(lookupData.status)!==200||!lookupData.result)return res.status(502).json({error:"Lulu upload-server lookup failed",message:lookupData.msg}); const form=new FormData(); form.append("key",key);form.append("file_title",title);form.append("file_public","1");form.append("file_adult","1");form.append("html_redirect","0");form.append("file",fs.createReadStream(tempPath),{filename:req.file.originalname||"upload.mp4",contentType:req.file.mimetype||"application/octet-stream",knownLength:req.file.size}); const headers:any=form.getHeaders();headers.Accept="application/json";headers["Content-Length"]=String(await new Promise<number>((resolve,reject)=>form.getLength((err,len)=>err?reject(err):resolve(len)))); const uploadData:any=await new Promise((resolve,reject)=>{const target=new URL(String(lookupData.result));const client=target.protocol==="https:"?require("https"):require("http");const request=client.request(target,{method:"POST",headers,timeout:30*60*1000},(response:any)=>{let body="";response.setEncoding("utf8");response.on("data",(c:string)=>body+=c);response.on("end",()=>{try{const parsed=JSON.parse(body);if(response.statusCode<200||response.statusCode>=300)reject(new Error(`Lulu HTTP ${response.statusCode}: ${body.slice(0,1000)}`));else resolve(parsed)}catch{reject(new Error("Lulu returned invalid JSON"))}})});request.on("timeout",()=>request.destroy(new Error("Lulu upload timed out")));request.on("error",reject);form.pipe(request)});const entry=Array.isArray(uploadData?.files)?uploadData.files.find((x:any)=>x&&(x.filecode||x.fileCode||x.file_code)):null;const fileCode=entry?.filecode||entry?.fileCode||entry?.file_code;if(!fileCode)return res.status(502).json({error:"Lulu returned an unexpected upload response"});res.json({success:true,fileCode:String(fileCode),embedUrl:`https://lulustream.com/e/${fileCode}`});}catch(e:any){res.status(502).json({error:e?.message||"Lulu upload failed"})}finally{if(tempPath){try{fs.unlinkSync(tempPath)}catch{}}} }
-app.post("/api/lulu/upload",upload.single("file"),handleLuluUpload);
-
-async function handleUqloadUpload(req: any, res: any) {
-  const adminId = await requireAdmin(req, res);
-  if (!adminId) return;
-  let tempPath = "";
-  try {
-    const key = String(process.env.UQLOAD_API_KEY || "").trim();
-    if (!key) return res.status(500).json({ error: "UQLOAD is not configured" });
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    tempPath = req.file.path;
-
-    const serverRes = await fetch(`https://uqload.vc/api/upload/server?key=${encodeURIComponent(key)}`, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(30000)
-    });
-    const serverText = await serverRes.text();
-    let serverData: any;
-    try { serverData = JSON.parse(serverText); } catch { serverData = null; }
-    if (!serverRes.ok || Number(serverData?.status) !== 200 || !serverData?.result) {
-      return res.status(502).json({ error: "Failed to get UQLOAD upload server", details: serverData?.msg || serverText.slice(0, 2000) });
-    }
-
-    const target = new URL(String(serverData.result));
-    if (target.protocol !== "http:" && target.protocol !== "https:") {
-      return res.status(502).json({ error: "UQLOAD returned an invalid upload URL" });
-    }
-
-    const form = new FormData();
-    form.append("key", key);
-    form.append("file_title", String(req.body?.file_title || req.file.originalname || "Video").slice(0, 300));
-    form.append("html_redirect", "0");
-    form.append("file", fs.createReadStream(tempPath), {
-      filename: req.file.originalname || "upload.mp4",
-      contentType: req.file.mimetype || "application/octet-stream",
-      knownLength: req.file.size
-    });
-
-    const headers: Record<string, string> = {
-      ...form.getHeaders(),
-      Accept: "application/json"
-    };
-    const contentLength = await new Promise<number>((resolve, reject) => {
-      form.getLength((err, length) => err ? reject(err) : resolve(length));
-    });
-    headers["Content-Length"] = String(contentLength);
-
-    const uploadResult: any = await new Promise((resolve, reject) => {
-      const client = target.protocol === "https:" ? require("https") : require("http");
-      const request = client.request(target, {
-        method: "POST",
-        headers,
-        timeout: 30 * 60 * 1000
-      }, (response: any) => {
-        let body = "";
-        response.setEncoding("utf8");
-        response.on("data", (chunk: string) => { body += chunk; });
-        response.on("end", () => {
-          let parsed: any = null;
-          try { parsed = JSON.parse(body); } catch { parsed = null; }
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            reject(new Error(`UQLOAD HTTP ${response.statusCode}: ${(parsed?.msg || parsed?.error || body).slice(0, 2000)}`));
-            return;
-          }
-          if (!parsed) {
-            reject(new Error(`UQLOAD returned invalid JSON: ${body.slice(0, 2000)}`));
-            return;
-          }
-          resolve(parsed);
-        });
-      });
-      request.on("timeout", () => request.destroy(new Error("UQLOAD upload timed out")));
-      request.on("error", reject);
-      form.on("error", reject);
-      form.pipe(request);
-    });
-
-    res.json(uploadResult);
-  } catch (e: any) {
-    console.error("[UQLOAD] proxy upload failed:", e);
-    res.status(502).json({ error: "UQLOAD upload failed", details: e?.message || String(e) });
-  } finally {
-    if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} }
-  }
-}
-
+async function handleUqloadUpload(req: any, res: any) { const adminId = await requireAdmin(req, res); if (!adminId) return; let tempPath = ""; try { const key = String(process.env.UQLOAD_API_KEY || "").trim(); if (!key) return res.status(500).json({ error: "UQLOAD is not configured" }); if (!req.file) return res.status(400).json({ error: "No file uploaded" }); tempPath = req.file.path; const serverRes = await fetch(`https://uqload.vc/api/upload/server?key=${encodeURIComponent(key)}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(30000) }); const serverText = await serverRes.text(); let serverData: any; try { serverData = JSON.parse(serverText); } catch { serverData = null; } if (!serverRes.ok || Number(serverData?.status) !== 200 || !serverData?.result) return res.status(502).json({ error: "Failed to get UQLOAD upload server", details: serverData?.msg || serverText.slice(0, 2000) }); const target = new URL(String(serverData.result)); const form = new FormData(); form.append("key", key); form.append("file_title", String(req.body?.file_title || req.file.originalname || "Video").slice(0, 300)); form.append("html_redirect", "0"); form.append("file", fs.createReadStream(tempPath), { filename: req.file.originalname || "upload.mp4", contentType: req.file.mimetype || "application/octet-stream", knownLength: req.file.size }); const headers: Record<string, string> = { ...form.getHeaders(), Accept: "application/json" }; headers["Content-Length"] = String(await new Promise<number>((resolve, reject) => form.getLength((err, length) => err ? reject(err) : resolve(length)))); const uploadResult: any = await new Promise((resolve, reject) => { const client = target.protocol === "https:" ? require("https") : require("http"); const request = client.request(target, { method: "POST", headers, timeout: 30 * 60 * 1000 }, (response: any) => { let body = ""; response.setEncoding("utf8"); response.on("data", (chunk: string) => { body += chunk; }); response.on("end", () => { let parsed: any = null; try { parsed = JSON.parse(body); } catch {} if (response.statusCode < 200 || response.statusCode >= 300) return reject(new Error(`UQLOAD HTTP ${response.statusCode}: ${(parsed?.msg || parsed?.error || body).slice(0, 2000)}`)); if (!parsed) return reject(new Error(`UQLOAD returned invalid JSON: ${body.slice(0, 2000)}`)); resolve(parsed); }); }); request.on("timeout", () => request.destroy(new Error("UQLOAD upload timed out"))); request.on("error", reject); form.on("error", reject); form.pipe(request); }); res.json(uploadResult); } catch (e: any) { console.error("[UQLOAD] proxy upload failed:", e); res.status(502).json({ error: "UQLOAD upload failed", details: e?.message || String(e) }); } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } } }
 app.post("/api/uqload/proxy-upload", upload.single("file"), handleUqloadUpload);
 app.get("/api/uqload/upload-server", async (req, res) => { const adminId = await requireAdmin(req, res); if (!adminId) return; try { const key = String(process.env.UQLOAD_API_KEY || "").trim(); if (!key) return res.status(500).json({ error: "UQLOAD is not configured" }); const response = await fetch(`https://uqload.vc/api/upload/server?key=${encodeURIComponent(key)}`); const data: any = await response.json(); if (!response.ok || data.status !== 200 || !data.result) return res.status(502).json({ error: data.msg || "Failed to get UQLOAD upload server" }); res.json({ uploadUrl: data.result }); } catch (e: any) { res.status(502).json({ error: e?.message || "UQLOAD upload-server lookup failed" }); } });
 
