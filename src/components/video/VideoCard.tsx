@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle, Eye, Heart, Clock, MoreVertical, Share2, Flag, Bookmark } from 'lucide-react';
 import { Video } from '../../types';
@@ -17,6 +17,8 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
   const { showToast } = useNotification();
   const [showMenu, setShowMenu] = useState(false);
   const [isFavorited, setIsFavorited] = useState(video.is_favorited || false);
+  const previewRef = useRef<HTMLVideoElement>(null);
+  const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -41,6 +43,51 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
     return `${Math.floor(diffDays / 365)}y ago`;
   };
 
+  useEffect(() => {
+    const el = previewRef.current;
+    if (!el || !video.video_url) return;
+
+    let observer: IntersectionObserver | null = null;
+
+    const stopPreview = () => {
+      if (stopTimerRef.current) clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+      el.pause();
+      try { el.currentTime = 0; } catch { /* ignore */ }
+    };
+
+    const startPreview = async () => {
+      if (el.paused === false) return;
+      try {
+        el.currentTime = 0;
+        await el.play();
+        stopTimerRef.current = setTimeout(stopPreview, 3000);
+      } catch {
+        // Browser may block autoplay; the thumbnail remains available as fallback.
+      }
+    };
+
+    if ('IntersectionObserver' in window) {
+      observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) startPreview();
+            else stopPreview();
+          });
+        },
+        { threshold: 0.6 }
+      );
+      observer.observe(el);
+    } else {
+      startPreview();
+    }
+
+    return () => {
+      observer?.disconnect();
+      stopPreview();
+    };
+  }, [video.video_url]);
+
   const handleToggleFavorite = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -60,16 +107,22 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
 
   return (
     <div className="group relative flex flex-col rounded-xl sm:rounded-2xl bg-[#0a0a0a] border border-white/5 hover:border-white/15 transition-all duration-300 overflow-hidden hover:shadow-xl hover:shadow-black">
-      {/* Thumbnail Container */}
+      {/* 3-second muted video preview. Falls back to the thumbnail if autoplay/stream playback is unavailable. */}
       <Link to={`/watch/${video.slug || video.id}`} className="relative aspect-video w-full overflow-hidden bg-[#050505]">
         <img
           src={video.thumbnail_url}
           alt={video.title}
           loading="lazy"
-          onError={(e) => {
-            (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1280&auto=format&fit=crop&q=80';
-          }}
-          className="w-full h-full object-cover scale-110 blur-xl group-hover:scale-105 group-hover:blur-0 transition-all duration-500"
+          className="absolute inset-0 w-full h-full object-cover scale-110 blur-xl group-hover:scale-105 group-hover:blur-0 transition-all duration-500"
+        />
+        <video
+          ref={previewRef}
+          src={video.preview_animation_url || video.video_url}
+          muted
+          playsInline
+          preload="metadata"
+          className="absolute inset-0 w-full h-full object-cover"
+          aria-hidden="true"
         />
 
         {/* Duration Badge */}
