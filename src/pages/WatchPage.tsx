@@ -27,6 +27,7 @@ import { ShareModal } from '../components/video/ShareModal';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
 import { Profile } from '../types';
+import { SEO } from '../components/SEO';
 
 function generateUUID() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
