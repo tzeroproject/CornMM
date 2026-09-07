@@ -66,7 +66,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
         await el.play();
         stopTimerRef.current = setTimeout(stopPreview, 3000);
       } catch {
-        // Browser may block autoplay; thumbnail remains underneath as fallback.
+        // Browser may block autoplay; thumbnail remains visible as fallback.
       }
     };
 
@@ -74,11 +74,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
       const isHls = /\.m3u8(?:$|\?)/i.test(source);
 
       if (isHls) {
-        // Safari/iOS can play HLS natively.
         if (el.canPlayType('application/vnd.apple.mpegurl')) {
           el.src = source;
         } else {
-          // Chrome/Firefox need hls.js for an HLS video_url.
           try {
             const { default: Hls } = await import('hls.js');
             if (cancelled) return;
@@ -103,7 +101,6 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
           }
         }
       } else {
-        // Direct MP4/WebM/etc. video_url works without preview_animation_url.
         el.src = source;
       }
 
@@ -156,13 +153,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
 
   return (
     <div className="group relative flex flex-col rounded-xl sm:rounded-2xl bg-[#0a0a0a] border border-white/5 hover:border-white/15 transition-all duration-300 overflow-hidden hover:shadow-xl hover:shadow-black">
-      {/* 3-second muted video preview using video_url; preview_animation_url is not required. */}
+      {/* 3-second muted video preview using video_url; no preview animation URL required. */}
       <Link to={`/watch/${video.slug || video.id}`} className="relative aspect-video w-full overflow-hidden bg-[#050505]">
         <img
           src={video.thumbnail_url}
           alt={video.title}
           loading="lazy"
-          className="absolute inset-0 w-full h-full object-cover scale-110 blur-xl group-hover:scale-105 group-hover:blur-0 transition-all duration-500"
+          className="absolute inset-0 w-full h-full object-cover"
         />
         <video
           ref={previewRef}
@@ -173,27 +170,23 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
           aria-hidden="true"
         />
 
-        {/* Duration Badge */}
         <div className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded-md bg-black/85 backdrop-blur-md text-[10px] font-medium text-zinc-200 flex items-center gap-1 border border-white/10 shadow">
           <Clock className="w-3 h-3 text-amber-400" />
           {formatDuration(video.duration)}
         </div>
 
-        {/* Category Pill */}
         {video.category && (
           <div className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-black/80 backdrop-blur-md text-[9px] font-semibold text-zinc-300 border border-white/10 uppercase tracking-wider">
             {video.category.name}
           </div>
         )}
 
-        {/* Age Gate Flag */}
         {video.is_age_restricted && (
           <div className="absolute top-2.5 right-2.5 px-1.5 py-0.5 rounded bg-amber-500 text-black font-bold text-[9px] tracking-wider uppercase">
             18+
           </div>
         )}
 
-        {/* Pending Review Badge (if viewer is creator or admin) */}
         {video.moderation_status !== 'published' && (
           <div className="absolute inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 text-center">
             <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30">
@@ -203,9 +196,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
         )}
       </Link>
 
-      {/* Details Row */}
       <div className="p-2 sm:p-3.5 flex items-start gap-2 sm:gap-3">
-        {/* Creator Avatar */}
         <Link to={`/creator/${video.creator?.username || video.creator_id}`} className="shrink-0 mt-0.5">
           <img
             src={video.creator?.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
@@ -214,7 +205,6 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
           />
         </Link>
 
-        {/* Info */}
         <div className="flex-1 min-w-0">
           <Link to={`/watch/${video.slug || video.id}`} className="block">
             <h3 className="font-semibold text-xs sm:text-sm text-white line-clamp-2 leading-snug group-hover:text-amber-400 transition-colors">
@@ -249,7 +239,6 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
           </div>
         </div>
 
-        {/* Options Menu Toggle */}
         <div className="relative shrink-0">
           <button
             onClick={() => setShowMenu(!showMenu)}
