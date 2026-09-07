@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { SEO } from './components/SEO';
 import { PWAInstallPrompt } from './components/PWAInstallPrompt';
+import { AgeGate } from './components/AgeGate';
 import { AppLayout } from './components/layout/AppLayout';
 
 // Pages
@@ -33,35 +34,37 @@ export const App: React.FC = () => {
       <SEO />
       <NotificationProvider>
         <AuthProvider>
-          <Routes>
-            <Route path="/" element={<AppLayout />}>
-              <Route index element={<HomePage />} />
-              <Route path="trending" element={<TrendingPage />} />
-              <Route path="latest" element={<LatestPage />} />
-              <Route path="categories" element={<CategoriesPage />} />
-              <Route path="category/:slug" element={<CategoryPage />} />
-              <Route path="search" element={<SearchPage />} />
-              <Route path="watch/:id" element={<WatchPage />} />
-              <Route path="creator/:username" element={<CreatorProfilePage />} />
-              <Route path="upload" element={<UploadPage />} />
-              <Route path="dashboard" element={<UserDashboardPage />} />
-              <Route path="edit/:id" element={<EditVideoPage />} />
-              <Route path="history" element={<WatchHistoryPage />} />
-              <Route path="favorites" element={<FavoritesPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-              <Route path="admin" element={<AdminDashboardPage />} />
-              <Route path="corn-admin-login" element={<LoginPage />} />
-              <Route path="register" element={<RegisterPage />} />
-              <Route path="forgot-password" element={<ForgotPasswordPage />} />
-              <Route path="terms" element={<TermsPage />} />
-              <Route path="privacy" element={<PrivacyPage />} />
-              <Route path="dmca" element={<DmcaPage />} />
-              <Route path="guidelines" element={<GuidelinesPage />} />
-              <Route path="contact" element={<ContactPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Routes>
-          <PWAInstallPrompt />
+          <AgeGate>
+            <Routes>
+              <Route path="/" element={<AppLayout />}>
+                <Route index element={<HomePage />} />
+                <Route path="trending" element={<TrendingPage />} />
+                <Route path="latest" element={<LatestPage />} />
+                <Route path="categories" element={<CategoriesPage />} />
+                <Route path="category/:slug" element={<CategoryPage />} />
+                <Route path="search" element={<SearchPage />} />
+                <Route path="watch/:id" element={<WatchPage />} />
+                <Route path="creator/:username" element={<CreatorProfilePage />} />
+                <Route path="upload" element={<UploadPage />} />
+                <Route path="dashboard" element={<UserDashboardPage />} />
+                <Route path="edit/:id" element={<EditVideoPage />} />
+                <Route path="history" element={<WatchHistoryPage />} />
+                <Route path="favorites" element={<FavoritesPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+                <Route path="admin" element={<AdminDashboardPage />} />
+                <Route path="corn-admin-login" element={<LoginPage />} />
+                <Route path="register" element={<RegisterPage />} />
+                <Route path="forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="terms" element={<TermsPage />} />
+                <Route path="privacy" element={<PrivacyPage />} />
+                <Route path="dmca" element={<DmcaPage />} />
+                <Route path="guidelines" element={<GuidelinesPage />} />
+                <Route path="contact" element={<ContactPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Routes>
+            <PWAInstallPrompt />
+          </AgeGate>
         </AuthProvider>
       </NotificationProvider>
     </BrowserRouter>
