@@ -63,8 +63,8 @@ export default function UploadPage() {
     setError('');
     setSuccess('');
 
-    if (uploadMode !== 'bunny' && !user) {
-      setError('Please sign in for UQLOAD or Embed uploads. Bunny Stream uploads are public.');
+    if (!user) {
+      setError('Please sign in before uploading a video.');
       return;
     }
     if (!title.trim()) {
@@ -83,7 +83,7 @@ export default function UploadPage() {
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId || undefined,
-          creator_id: user!.id,
+          creator_id: user.id,
           video_url: source,
           thumbnail_url: '',
           preview_animation_url: '',
@@ -100,7 +100,7 @@ export default function UploadPage() {
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId || undefined,
-          ...(user?.id ? { creator_id: user.id } : {}),
+          creator_id: user.id,
           video_url: getBunnyHlsUrl(upload.libraryId, videoId),
           thumbnail_url: getBunnyThumbnailUrl(upload.libraryId, videoId),
           preview_animation_url: getBunnyPreviewUrl(upload.libraryId, videoId),
@@ -143,7 +143,7 @@ export default function UploadPage() {
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId || undefined,
-          creator_id: user!.id,
+          creator_id: user.id,
           video_url: `https://uqload.vc/e/${fileCode}`,
           thumbnail_url: '',
           preview_animation_url: '',
@@ -171,7 +171,7 @@ export default function UploadPage() {
       <div className="max-w-3xl mx-auto space-y-6">
         <div>
           <h1 className="text-3xl font-black">Upload Video</h1>
-          <p className="text-sm text-zinc-400 mt-1">Bunny Stream uploads are open to everyone. UQLOAD and Embed remain restricted.</p>
+          <p className="text-sm text-zinc-400 mt-1">Sign in is required for all video uploads. UQLOAD and Embed are admin-only.</p>
         </div>
 
         <div className="flex bg-[#0a0a0a] border border-white/10 rounded-xl p-1">
@@ -227,7 +227,7 @@ export default function UploadPage() {
           {success && <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300">{success}</div>}
 
           <button type="submit" disabled={isUploading} className="w-full py-4 rounded-2xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">
-            {isUploading ? <><Loader2 className="w-5 h-5 animate-spin" /> Uploading...</> : <><LinkIcon className="w-5 h-5" /> {uploadMode === 'embed' ? 'Add Embed Video' : 'Upload Video'}</>}
+            {isUploading ? <><Loader2 className="w-5 h-5 animate-spin" /> Uploading...</> : <><LinkIcon className="w-5 h-5" /> {uploadMode === 'embed' ? 'Add Embed Video' : 'Upload Video'}</button>}
           </button>
         </form>
       </div>
