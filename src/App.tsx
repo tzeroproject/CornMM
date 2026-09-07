@@ -10,6 +10,7 @@ import { HomePage } from './pages/HomePage';
 import { TrendingPage } from './pages/TrendingPage';
 import { LatestPage } from './pages/LatestPage';
 import { CategoriesPage } from './pages/CategoriesPage';
+import { CategoryPage } from './pages/CategoryPage';
 import { SearchPage } from './pages/SearchPage';
 import { WatchPage } from './pages/WatchPage';
 import { CreatorProfilePage } from './pages/CreatorProfilePage';
@@ -37,6 +38,7 @@ export const App: React.FC = () => {
               <Route path="trending" element={<TrendingPage />} />
               <Route path="latest" element={<LatestPage />} />
               <Route path="categories" element={<CategoriesPage />} />
+              <Route path="category/:slug" element={<CategoryPage />} />
               <Route path="search" element={<SearchPage />} />
               <Route path="watch/:id" element={<WatchPage />} />
               <Route path="creator/:username" element={<CreatorProfilePage />} />
