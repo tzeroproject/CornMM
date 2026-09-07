@@ -101,7 +101,7 @@ app.get("/sitemap.xml", async (_req, res) => {
       ["/contact", "monthly", "0.3"]
     ];
     let urls = staticUrls.map(([path, freq, priority]) =>
-      `  <url><loc>https://cornmm.com${path}</loc><changefreq>${freq}</changefreq><priority>${priority}</priority></url>`
+      `  <url><loc>https://cornmm.site${path}</loc><changefreq>${freq}</changefreq><priority>${priority}</priority></url>`
     );
     if (supabaseAdmin) {
       const { data: videos } = await supabaseAdmin
@@ -112,7 +112,7 @@ app.get("/sitemap.xml", async (_req, res) => {
         .order("created_at", { ascending: false })
         .limit(50000);
       for (const video of videos || []) {
-        const loc = `https://cornmm.com/watch/${encodeURIComponent(video.slug || video.id)}`;
+        const loc = `https://cornmm.site/watch/${encodeURIComponent(video.slug || video.id)}`;
         const lastmod = video.updated_at || video.created_at;
         urls.push(`  <url><loc>${loc}</loc>${lastmod ? `<lastmod>${new Date(lastmod).toISOString()}</lastmod>` : ""}<changefreq>weekly</changefreq><priority>0.8</priority></url>`);
       }
@@ -143,7 +143,7 @@ app.get("/watch/:slug", async (req, res, next) => {
     if (!video) return next();
 
     const html = fs.readFileSync(indexPath, "utf8");
-    const siteUrl = "https://cornmm.com";
+    const siteUrl = "https://cornmm.site";
     const canonical = `${siteUrl}/watch/${encodeURIComponent(video.slug || video.id)}`;
     const description = String(video.description || `Watch ${video.title} on CornMM.`).replace(/\s+/g, " ").trim().slice(0, 300);
     const esc = (value: any) => String(value ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
