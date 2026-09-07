@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import type { Video } from '../types';
 
 const SITE_NAME = 'CornMM';
 const SITE_URL = (import.meta.env.VITE_SITE_URL || 'https://cornmm.com').replace(/\/$/, '');
@@ -17,13 +18,13 @@ const PAGE_META: Record<string, { title: string; description: string; index?: bo
   '/contact': { title: 'Contact – CornMM', description: 'Contact the CornMM team.' },
 };
 
-export function SEO() {
+export function SEO({ video }: { video?: Video | null }) {
   const { pathname } = useLocation();
-  const meta = PAGE_META[pathname] || (pathname.startsWith('/watch/')
+  const meta = video ? { title: `${video.title} – CornMM`, description: String(video.description || `Watch ${video.title} on CornMM.`).replace(/\s+/g, ' ').trim().slice(0, 300), index: true } : (PAGE_META[pathname] || (pathname.startsWith('/watch/')
     ? { title: 'Watch Video – CornMM', description: 'Watch videos on CornMM.', index: true }
     : pathname.startsWith('/creator/')
       ? { title: 'Creator Profile – CornMM', description: 'Explore creator videos and profiles on CornMM.', index: true }
-      : { title: 'CornMM – Video Platform', description: DEFAULT_DESCRIPTION, index: false });
+      : { title: 'CornMM – Video Platform', description: DEFAULT_DESCRIPTION, index: false }));
 
   useEffect(() => {
     const canonical = new URL(pathname || '/', SITE_URL).href;
@@ -50,6 +51,25 @@ export function SEO() {
     setMeta('meta[name="twitter:description"]', 'content', meta.description);
 
     document.head.querySelector('#cornmm-schema')?.remove();
+    document.head.querySelector('#cornmm-video-schema')?.remove();
+    if (video) {
+      const script = document.createElement('script');
+      script.id = 'cornmm-video-schema';
+      script.type = 'application/ld+json';
+      script.textContent = JSON.stringify({
+        '@context': 'https://schema.org', '@type': 'VideoObject',
+        name: video.title, description: meta.description,
+        thumbnailUrl: video.thumbnail_url ? [video.thumbnail_url] : [],
+        uploadDate: video.created_at,
+        duration: video.duration ? `PT${Math.floor(video.duration / 3600) ? Math.floor(video.duration / 3600) + 'H' : ''}${Math.floor((video.duration % 3600) / 60) ? Math.floor((video.duration % 3600) / 60) + 'M' : ''}${video.duration % 60 ? (video.duration % 60) + 'S' : ''}` : undefined,
+        contentUrl: video.video_url || undefined,
+        url: new URL(pathname, SITE_URL).href,
+        publisher: { '@type': 'Organization', name: SITE_NAME, url: SITE_URL },
+        author: video.creator ? { '@type': 'Person', name: video.creator.display_name, url: `${SITE_URL}/creator/${encodeURIComponent(video.creator.username)}` } : undefined,
+        genre: video.category?.name || undefined
+      });
+      document.head.appendChild(script);
+    }
     if (meta.index !== false && ['/', '/trending', '/latest', '/categories'].includes(pathname)) {
       const script = document.createElement('script');
       script.id = 'cornmm-schema';
@@ -62,7 +82,7 @@ export function SEO() {
       });
       document.head.appendChild(script);
     }
-  }, [pathname, meta.title, meta.description, meta.index]);
+  }, [pathname, meta.title, meta.description, meta.index, video]);
 
   return null;
 }
