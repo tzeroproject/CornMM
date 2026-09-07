@@ -19,6 +19,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
   const [isFavorited, setIsFavorited] = useState(video.is_favorited || false);
   const previewRef = useRef<HTMLVideoElement>(null);
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const bunnyThumbnail = video.bunny_video_id
+    ? `https://vz-${video.bunny_video_id.slice(0, 3)}.b-cdn.net/${video.bunny_video_id}/thumbnail.jpg`
+    : '';
+  const uqloadThumbnail = video.provider === 'uqload' && video.provider_id
+    ? `/api/uqload/thumbnail/${encodeURIComponent(video.provider_id)}`
+    : '';
+  const thumbnailSrc = (!thumbnailFailed && video.thumbnail_url) || bunnyThumbnail || uqloadThumbnail || '';
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -156,8 +164,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
       {/* 3-second muted video preview using video_url; no preview animation URL required. */}
       <Link to={`/watch/${video.slug || video.id}`} className="relative aspect-video w-full overflow-hidden bg-[#050505]">
         <img
-          src={video.thumbnail_url}
+          src={thumbnailSrc}
           alt={video.title}
+          onError={() => setThumbnailFailed(true)}
           loading="lazy"
           className="absolute inset-0 w-full h-full object-cover"
         />
@@ -166,6 +175,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
           muted
           playsInline
           preload="metadata"
+          poster={thumbnailSrc || undefined}
           className="absolute inset-0 w-full h-full object-cover"
           aria-hidden="true"
         />
