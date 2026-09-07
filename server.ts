@@ -85,6 +85,121 @@ app.get("/api/admin/audit-logs", async (req, res) => { const admin = await requi
 app.post("/api/admin/audit-log", async (req, res) => { const admin = await requireAdmin(req, res); if (!admin || !supabaseAdmin) return; const body = req.body || {}; const { data, error } = await supabaseAdmin.from("admin_actions").insert({ admin_id: admin, action: body.action, target_type: body.targetType, target_id: body.targetId, target_name: body.targetName || null, details: body.details || null }).select("*, admin:profiles!admin_id(*)").single(); if (error) return res.status(400).json({ error: error.message }); res.status(201).json({ log: data }); });
 app.post("/api/admin/sync-bunny", async (req, res) => { const admin = await requireAdmin(req, res); if (!admin || !supabaseAdmin) return; const bunny = bunnyConfig(); if (!bunny.apiKey || !bunny.libraryId) return res.status(500).json({ error: "Missing Bunny configuration" }); try { const r = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos?page=1&itemsPerPage=1000`, { headers: { AccessKey: bunny.apiKey } }); const data: any = await r.json(); let synced = 0; for (const v of data.items || []) { const { error } = await supabaseAdmin.from("videos").upsert({ bunny_video_id: v.guid, title: v.title, slug: `${v.guid}-bunny`, creator_id: admin, processing_status: v.status === 4 ? "ready" : "processing", visibility: "public", moderation_status: "published" }, { onConflict: "bunny_video_id" }); if (!error) synced++; } res.json({ syncedCount: synced, totalBunnyVideos: (data.items || []).length }); } catch (e: any) { res.status(502).json({ error: e?.message || "Bunny sync failed" }); } });
 
+
+// SEO: dynamic XML sitemap with all published public video pages.
+app.get("/sitemap.xml", async (_req, res) => {
+  try {
+    const staticUrls = [
+      ["/", "hourly", "1.0"],
+      ["/trending", "hourly", "0.9"],
+      ["/latest", "hourly", "0.9"],
+      ["/categories", "daily", "0.8"],
+      ["/terms", "monthly", "0.2"],
+      ["/privacy", "monthly", "0.2"],
+      ["/dmca", "monthly", "0.3"],
+      ["/guidelines", "monthly", "0.3"],
+      ["/contact", "monthly", "0.3"]
+    ];
+    let urls = staticUrls.map(([path, freq, priority]) =>
+      `  <url><loc>https://cornmm.com${path}</loc><changefreq>${freq}</changefreq><priority>${priority}</priority></url>`
+    );
+    if (supabaseAdmin) {
+      const { data: videos } = await supabaseAdmin
+        .from("videos")
+        .select("id, slug, updated_at, created_at")
+        .eq("moderation_status", "published")
+        .eq("visibility", "public")
+        .order("created_at", { ascending: false })
+        .limit(50000);
+      for (const video of videos || []) {
+        const loc = `https://cornmm.com/watch/${encodeURIComponent(video.slug || video.id)}`;
+        const lastmod = video.updated_at || video.created_at;
+        urls.push(`  <url><loc>${loc}</loc>${lastmod ? `<lastmod>${new Date(lastmod).toISOString()}</lastmod>` : ""}<changefreq>weekly</changefreq><priority>0.8</priority></url>`);
+      }
+    }
+    res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.join("\n")}
+</urlset>`);
+  } catch (e) {
+    res.status(500).type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>`);
+  }
+});
+
+// SEO: server-render the important metadata for video pages so crawlers receive
+// title, description, canonical, Open Graph and VideoObject JSON-LD immediately.
+app.get("/watch/:slug", async (req, res, next) => {
+  try {
+    const indexPath = path.join(distPath, "index.html");
+    if (!fs.existsSync(indexPath) || !supabaseAdmin) return next();
+    const key = String(req.params.slug);
+    const { data: video } = await supabaseAdmin
+      .from("videos")
+      .select("*, category:categories(name,slug), creator:profiles(username,display_name)")
+      .or(`slug.eq.${key.replace(/,/g, "")},id.eq.${key.replace(/,/g, "")}`)
+      .eq("moderation_status", "published")
+      .eq("visibility", "public")
+      .maybeSingle();
+    if (!video) return next();
+
+    const html = fs.readFileSync(indexPath, "utf8");
+    const siteUrl = "https://cornmm.com";
+    const canonical = `${siteUrl}/watch/${encodeURIComponent(video.slug || video.id)}`;
+    const description = String(video.description || `Watch ${video.title} on CornMM.`).replace(/\s+/g, " ").trim().slice(0, 300);
+    const esc = (value: any) => String(value ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const isoDuration = (() => {
+      const seconds = Number(video.duration || 0);
+      if (!seconds) return "";
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      const s = seconds % 60;
+      return `PT${h ? h + "H" : ""}${m ? m + "M" : ""}${s ? s + "S" : ""}`;
+    })();
+    const schema = {
+      "@context": "https://schema.org",
+      "@type": "VideoObject",
+      name: video.title,
+      description,
+      thumbnailUrl: video.thumbnail_url ? [video.thumbnail_url] : [],
+      uploadDate: video.created_at,
+      ...(isoDuration ? { duration: isoDuration } : {}),
+      ...(video.video_url ? { contentUrl: video.video_url } : {}),
+      url: canonical,
+      publisher: {
+        "@type": "Organization",
+        name: "CornMM",
+        url: siteUrl
+      },
+      ...(video.creator ? {
+        author: {
+          "@type": "Person",
+          name: video.creator.display_name,
+          url: `${siteUrl}/creator/${encodeURIComponent(video.creator.username)}`
+        }
+      } : {}),
+      ...(video.category ? { genre: video.category.name } : {})
+    };
+    const head = `
+<title>${esc(video.title)} – CornMM</title>
+<meta name="description" content="${esc(description)}" />
+<meta name="robots" content="index,follow" />
+<link rel="canonical" href="${esc(canonical)}" />
+<meta property="og:title" content="${esc(video.title)} – CornMM" />
+<meta property="og:description" content="${esc(description)}" />
+<meta property="og:url" content="${esc(canonical)}" />
+<meta property="og:type" content="video.other" />
+${video.thumbnail_url ? `<meta property="og:image" content="${esc(video.thumbnail_url)}" />` : ""}
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="${esc(video.title)} – CornMM" />
+<meta name="twitter:description" content="${esc(description)}" />
+${video.thumbnail_url ? `<meta name="twitter:image" content="${esc(video.thumbnail_url)}" />` : ""}
+<script id="cornmm-video-schema" type="application/ld+json">${JSON.stringify(schema).replace(/</g, "\\u003c")}</script>`;
+    res.type("html").send(html.replace(/<title>[\\s\\S]*?<\\/title>/i, "").replace("</head>", head + "\n  </head>"));
+  } catch {
+    next();
+  }
+});
+
 const distPath = path.resolve(process.cwd(), "dist");
 app.use(express.static(distPath));
 app.get("*", async (_req, res, next) => { try { const indexPath = path.join(distPath, "index.html"); if (fs.existsSync(indexPath)) return res.sendFile(indexPath); next(); } catch { next(); } });
