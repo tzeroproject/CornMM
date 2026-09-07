@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
 import { SEO } from './components/SEO';
+import { PWAInstallPrompt } from './components/PWAInstallPrompt';
 import { AppLayout } from './components/layout/AppLayout';
 
 // Pages
@@ -60,6 +61,7 @@ export const App: React.FC = () => {
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>
+          <PWAInstallPrompt />
         </AuthProvider>
       </NotificationProvider>
     </BrowserRouter>
