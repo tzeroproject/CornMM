@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Upload, X, Sparkles, Link as LinkIcon, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { createVideo, videoService } from '../services/videoService';
+import { videoService } from '../services/videoService';
 import { initBunnyVideoUpload, uploadVideoBinary, getBunnyHlsUrl, getBunnyThumbnailUrl, getBunnyPreviewUrl } from '../lib/bunny';
 import type { Category } from '../types';
 
@@ -79,7 +79,7 @@ export default function UploadPage() {
       if (uploadMode === 'embed') {
         const source = getEmbedSource(embedUrl);
         if (!/^https?:\/\//i.test(source)) throw new Error('Please enter a valid HTTP(S) embed URL or iframe code.');
-        await createVideo({
+        await videoService.createVideo({
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId || undefined,
@@ -96,7 +96,7 @@ export default function UploadPage() {
         const upload = await initBunnyVideoUpload(title.trim());
         await uploadVideoBinary(upload.proxyUploadUrl, selectedFile);
         const videoId = upload.videoId;
-        await createVideo({
+        await videoService.createVideo({
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId || undefined,
@@ -138,7 +138,7 @@ export default function UploadPage() {
 
         const fileCode = extractUqloadFileCode(response);
         if (!fileCode) throw new Error('UQLOAD did not return a file code.');
-        await createVideo({
+        await videoService.createVideo({
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId || undefined,
