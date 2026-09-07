@@ -21,4 +21,4 @@ Disallow: /search
 Disallow: /register
 Disallow: /forgot-password
 
-Sitemap: https://cornmm.com/sitemap.xml
+Sitemap: https://cornmm.site/sitemap.xml
