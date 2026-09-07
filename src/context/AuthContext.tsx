@@ -3,8 +3,6 @@ import { Profile } from '../types';
 import { supabase, isSupabaseConfigured, isSchemaReady, handleSupabaseError } from '../lib/supabase';
 import { useNotification } from './NotificationContext';
 
-
-
 interface AuthContextType {
   user: Profile | null;
   isLoading: boolean;
@@ -42,7 +40,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let isMounted = true;
 
     async function initAuth() {
-
       if (isSupabaseConfigured) {
         try {
           const { data: { session } } = await supabase.auth.getSession();
@@ -119,11 +116,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       let cleanIdentifier = identifier.trim().toLowerCase();
 
+      // The Supabase admin profile for the cadmin username uses this Auth email.
+      // Do not map cadmin to the separate admin@streamsphere.tv account.
       if (cleanIdentifier === 'cadmin') {
-        cleanIdentifier = 'admin@streamsphere.tv';
+        cleanIdentifier = 'cadmin@streamsphere.tv';
       }
-
-
 
       if (isSupabaseConfigured) {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -137,7 +134,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return true;
         }
       } else {
-        // Safe offline account matching
         let localUser: Profile;
         try {
           const registry = JSON.parse(localStorage.getItem('streamsphere_accounts_registry_v2') || '[]');
@@ -158,7 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               username: cleanIdentifier.includes('@')
                 ? cleanIdentifier.split('@')[0].replace(/[^a-z0-9_]/g, '')
                 : cleanIdentifier.replace(/[^a-z0-9_]/g, ''),
-              display_name: cleanIdentifier.includes('@') ? cleanIdentifier.split('@')[0] : identifier.trim(),
+              display_name: cleanIdentifier.includes('@' ) ? cleanIdentifier.split('@')[0] : identifier.trim(),
               role: 'creator',
               is_verified: false,
               is_suspended: false,
@@ -204,7 +200,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = async (email: string, pass: string, param3: string, param4: string): Promise<boolean> => {
     setIsLoading(true);
     try {
-      // Determine username vs displayName robustly regardless of caller parameter ordering
       let usernameCandidate = param3;
       let displayNameCandidate = param4;
       if (param4 && !param4.includes(' ') && param3.includes(' ')) {
