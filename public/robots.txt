@@ -11,12 +11,14 @@ Allow: /dmca
 Allow: /guidelines
 Allow: /contact
 
-# Restricted administration, creator studio, and internal API routes
 Disallow: /admin
 Disallow: /dashboard
 Disallow: /settings
 Disallow: /upload
 Disallow: /edit/
 Disallow: /api/
+Disallow: /search
+Disallow: /register
+Disallow: /forgot-password
 
-Sitemap: /sitemap.xml
+Sitemap: https://cornmm.com/sitemap.xml
