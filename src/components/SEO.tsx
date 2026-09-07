@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import type { Video } from '../types';
 
 const SITE_NAME = 'CornMM';
-const SITE_URL = (import.meta.env.VITE_SITE_URL || 'https://cornmm.com').replace(/\/$/, '');
+const SITE_URL = (import.meta.env.VITE_SITE_URL || 'https://cornmm.site').replace(/\/$/, '');
 const DEFAULT_DESCRIPTION = 'Discover trending and latest videos on CornMM. Browse categories, creators, and watch videos online.';
 
 const PAGE_META: Record<string, { title: string; description: string; index?: boolean }> = {
