@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Lock, User, Video, ArrowRight, Shield } from 'lucide-react';
+import { Lock, User, Video, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
 
@@ -13,26 +13,33 @@ export const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
+
     try {
       const ok = await signIn(identifier, password);
-      if (ok) {
-        if (identifier.trim().toLowerCase() === 'cadmin') {
-          navigate('/admin');
-        } else {
-          navigate('/');
-        }
+      if (!ok) return;
+
+      // cadmin uses a Supabase Auth session + profile role. Force a clean
+      // navigation so the AuthProvider rehydrates the fresh session before
+      // AdminDashboardPage evaluates its isAdmin guard.
+      if (identifier.trim().toLowerCase() === 'cadmin') {
+        window.location.assign('/admin');
+        return;
       }
+
+      navigate('/');
     } catch (err: any) {
-      showToast({ type: 'error', title: 'Sign In Failed', message: err.message || 'Invalid credentials' });
+      showToast({
+        type: 'error',
+        title: 'Sign In Failed',
+        message: err.message || 'Invalid credentials',
+      });
     } finally {
       setIsLoading(false);
     }
   };
-
 
   return (
     <div className="max-w-md mx-auto py-12 space-y-6">
