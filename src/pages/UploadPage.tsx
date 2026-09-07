@@ -23,6 +23,7 @@ import {
   getBunnyPreviewUrl 
 } from '../lib/bunny';
 import { uploadToLulu } from '../lib/lulu';
+import { supabase } from '../lib/supabase';
 import { Category, Tag } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useNotification } from '../context/NotificationContext';
@@ -233,9 +234,16 @@ export const UploadPage: React.FC = () => {
         formData.append('file', selectedFile);
         formData.append('file_title', title.trim());
         
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        const accessToken = sessionData.session?.access_token;
+        if (sessionError || !accessToken) {
+          throw new Error('Authentication required. Please sign in again and try the UQLOAD upload.');
+        }
+
         const result = await new Promise<any>((resolve, reject) => {
            const xhr = new XMLHttpRequest();
            xhr.open('POST', '/api/uqload/proxy-upload');
+           xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
            xhr.upload.onprogress = (e) => {
              if (e.lengthComputable) {
                const p = Math.round((e.loaded / e.total) * 90);
