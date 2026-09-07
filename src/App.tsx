@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { SEO } from './components/SEO';
 import { AppLayout } from './components/layout/AppLayout';
 
 // Pages
@@ -27,6 +28,7 @@ import { TermsPage, PrivacyPage, DmcaPage, GuidelinesPage, ContactPage } from '.
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
+      <SEO />
       <NotificationProvider>
         <AuthProvider>
           <Routes>
