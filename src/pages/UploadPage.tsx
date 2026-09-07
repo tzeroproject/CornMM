@@ -34,9 +34,8 @@ export default function UploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!isAdmin) return;
     videoService.getCategories().then(setCategories).catch(() => setCategories([]));
-  }, [isAdmin]);
+  }, []);
 
   const handleFileSelect = (file?: File) => {
     setError('');
@@ -64,8 +63,8 @@ export default function UploadPage() {
     setError('');
     setSuccess('');
 
-    if (!user) {
-      setError('Please sign in before uploading.');
+    if (uploadMode !== 'bunny' && !user) {
+      setError('Please sign in for UQLOAD or Embed uploads. Bunny Stream uploads are public.');
       return;
     }
     if (!title.trim()) {
@@ -77,13 +76,14 @@ export default function UploadPage() {
       setIsUploading(true);
 
       if (uploadMode === 'embed') {
+        if (!isAdmin) throw new Error('Admin access required for embed uploads.');
         const source = getEmbedSource(embedUrl);
         if (!/^https?:\/\//i.test(source)) throw new Error('Please enter a valid HTTP(S) embed URL or iframe code.');
         await videoService.createVideo({
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId || undefined,
-          creator_id: user.id,
+          creator_id: user!.id,
           video_url: source,
           thumbnail_url: '',
           preview_animation_url: '',
@@ -100,7 +100,7 @@ export default function UploadPage() {
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId || undefined,
-          creator_id: user.id,
+          ...(user?.id ? { creator_id: user.id } : {}),
           video_url: getBunnyHlsUrl(upload.libraryId, videoId),
           thumbnail_url: getBunnyThumbnailUrl(upload.libraryId, videoId),
           preview_animation_url: getBunnyPreviewUrl(upload.libraryId, videoId),
@@ -110,6 +110,7 @@ export default function UploadPage() {
         });
         setSuccess('Bunny Stream upload completed successfully.');
       } else {
+        if (!isAdmin) throw new Error('Admin access required for UQLOAD uploads.');
         if (!selectedFile) throw new Error('Please select a video file.');
         const session = await import('../lib/supabase').then(({ supabase }) => supabase.auth.getSession());
         const token = session.data.session?.access_token;
@@ -142,7 +143,7 @@ export default function UploadPage() {
           title: title.trim(),
           description: description.trim(),
           category_id: categoryId || undefined,
-          creator_id: user.id,
+          creator_id: user!.id,
           video_url: `https://uqload.vc/e/${fileCode}`,
           thumbnail_url: '',
           preview_animation_url: '',
@@ -165,16 +166,12 @@ export default function UploadPage() {
     }
   };
 
-  if (!isAdmin) {
-    return <div className="min-h-screen flex items-center justify-center text-zinc-400">Admin access required.</div>;
-  }
-
   return (
     <div className="min-h-screen bg-black text-white p-6 md:p-10">
       <div className="max-w-3xl mx-auto space-y-6">
         <div>
           <h1 className="text-3xl font-black">Upload Video</h1>
-          <p className="text-sm text-zinc-400 mt-1">Upload through Bunny Stream, UQLOAD, or add an external embed link.</p>
+          <p className="text-sm text-zinc-400 mt-1">Bunny Stream uploads are open to everyone. UQLOAD and Embed remain restricted.</p>
         </div>
 
         <div className="flex bg-[#0a0a0a] border border-white/10 rounded-xl p-1">
