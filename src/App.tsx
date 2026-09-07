@@ -12,7 +12,7 @@ import { CategoriesPage } from './pages/CategoriesPage';
 import { SearchPage } from './pages/SearchPage';
 import { WatchPage } from './pages/WatchPage';
 import { CreatorProfilePage } from './pages/CreatorProfilePage';
-import { UploadPage } from './pages/UploadPage';
+import UploadPage from './pages/UploadPage';
 import { UserDashboardPage } from './pages/UserDashboardPage';
 import { EditVideoPage } from './pages/EditVideoPage';
 import { WatchHistoryPage } from './pages/WatchHistoryPage';
