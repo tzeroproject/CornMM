@@ -3,6 +3,7 @@ Allow: /
 Allow: /trending
 Allow: /latest
 Allow: /categories
+Allow: /category/
 Allow: /watch/
 Allow: /creator/
 Allow: /terms
