@@ -2,6 +2,7 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "npm run build && npm start"
+# Railway runs only the Express API. The React/Vite frontend is deployed on Cloudflare Pages.
+startCommand = "npm run build:server && npm start"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
