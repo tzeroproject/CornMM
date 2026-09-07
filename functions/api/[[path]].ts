@@ -1,11 +1,9 @@
 /**
  * Cloudflare Pages -> Railway API proxy.
  *
- * The React frontend keeps using /api/*, while the real Express API runs on
- * Railway. Set API_ORIGIN in Cloudflare Pages environment variables to the
- * Railway service URL (for example https://cornmm-api.up.railway.app).
- *
- * No API secrets belong in this file or in the browser.
+ * The React frontend keeps using /api/* while the real Express API runs on
+ * Railway. API_ORIGIN must contain only the Railway origin, for example:
+ * https://cornmm-production.up.railway.app
  */
 
 interface Env {
@@ -13,27 +11,66 @@ interface Env {
 }
 
 export const onRequest = async ({ request, env }: { request: Request; env: Env }) => {
-  const origin = String(env.API_ORIGIN || '').trim().replace(/\/$/, '');
+  const rawOrigin = String(env.API_ORIGIN || '').trim();
 
-  if (!origin) {
+  if (!rawOrigin) {
     return new Response(
       JSON.stringify({ error: 'API_ORIGIN is not configured on Cloudflare Pages.' }),
       { status: 503, headers: { 'Content-Type': 'application/json' } },
     );
   }
 
+  let origin: URL;
+  try {
+    origin = new URL(rawOrigin);
+    origin.pathname = origin.pathname.replace(/\/$/, '');
+    origin.search = '';
+    origin.hash = '';
+  } catch {
+    return new Response(
+      JSON.stringify({ error: 'Invalid API_ORIGIN.', value: rawOrigin }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
   const incoming = new URL(request.url);
-  const target = new URL(`${origin}${incoming.pathname}${incoming.search}`);
+  const target = new URL(`${origin.toString().replace(/\/$/, '')}${incoming.pathname}${incoming.search}`);
 
-  // Forward the request body/headers unchanged so video uploads continue to
-  // stream through Cloudflare to the Railway Express backend.
-  const proxyRequest = new Request(target.toString(), request);
-  proxyRequest.headers.set('X-Forwarded-Host', incoming.host);
-  proxyRequest.headers.set('X-Forwarded-Proto', incoming.protocol.replace(':', ''));
+  const headers = new Headers(request.headers);
+  headers.set('X-Forwarded-Host', incoming.host);
+  headers.set('X-Forwarded-Proto', incoming.protocol.replace(':', ''));
+  headers.set('X-Forwarded-For', request.headers.get('CF-Connecting-IP') || '');
+  headers.delete('host');
 
-  const response = await fetch(proxyRequest);
+  try {
+    const proxyRequest = new Request(target.toString(), {
+      method: request.method,
+      headers,
+      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
+      redirect: 'manual',
+    });
 
-  // Return the Railway response to the browser. The browser sees the
-  // Cloudflare Pages origin, so no public API CORS configuration is required.
-  return response;
+    const response = await fetch(proxyRequest);
+
+    // Preserve Railway's status/body/headers while exposing only the proxied
+    // response through the Cloudflare Pages origin.
+    return response;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    return new Response(
+      JSON.stringify({
+        error: 'Cloudflare could not reach the Railway API.',
+        target: `${origin.origin}${incoming.pathname}`,
+        message,
+      }),
+      {
+        status: 502,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        },
+      },
+    );
+  }
 };
