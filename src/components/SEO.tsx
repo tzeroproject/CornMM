@@ -20,11 +20,15 @@ const PAGE_META: Record<string, { title: string; description: string; index?: bo
 
 export function SEO({ video }: { video?: Video | null }) {
   const { pathname } = useLocation();
-  const meta = video ? { title: `${video.title} – CornMM`, description: String(video.description || `Watch ${video.title} on CornMM.`).replace(/\s+/g, ' ').trim().slice(0, 300), index: true } : (PAGE_META[pathname] || (pathname.startsWith('/watch/')
-    ? { title: 'Watch Video – CornMM', description: 'Watch videos on CornMM.', index: true }
-    : pathname.startsWith('/creator/')
-      ? { title: 'Creator Profile – CornMM', description: 'Explore creator videos and profiles on CornMM.', index: true }
-      : { title: 'CornMM – Video Platform', description: DEFAULT_DESCRIPTION, index: false }));
+  const meta = video
+    ? { title: `${video.title} – CornMM`, description: String(video.description || `Watch ${video.title} on CornMM.`).replace(/\s+/g, ' ').trim().slice(0, 300), index: true }
+    : (PAGE_META[pathname] || (pathname.startsWith('/watch/')
+      ? { title: 'Watch Video – CornMM', description: 'Watch videos on CornMM.', index: true }
+      : pathname.startsWith('/creator/')
+        ? { title: 'Creator Profile – CornMM', description: 'Explore creator videos and profiles on CornMM.', index: true }
+        : pathname.startsWith('/category/')
+          ? { title: 'Category Videos – CornMM', description: 'Browse published videos in this CornMM category.', index: true }
+          : { title: 'CornMM – Video Platform', description: DEFAULT_DESCRIPTION, index: false }));
 
   useEffect(() => {
     const canonical = new URL(pathname || '/', SITE_URL).href;
@@ -74,12 +78,7 @@ export function SEO({ video }: { video?: Video | null }) {
       const script = document.createElement('script');
       script.id = 'cornmm-schema';
       script.type = 'application/ld+json';
-      script.textContent = JSON.stringify({
-        '@context': 'https://schema.org',
-        '@type': 'WebSite',
-        name: SITE_NAME,
-        url: SITE_URL
-      });
+      script.textContent = JSON.stringify({ '@context': 'https://schema.org', '@type': 'WebSite', name: SITE_NAME, url: SITE_URL });
       document.head.appendChild(script);
     }
   }, [pathname, meta.title, meta.description, meta.index, video]);
