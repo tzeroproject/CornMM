@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Upload, X, Sparkles, Link as LinkIcon, Loader2 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { createVideo, getCategories } from '../services/videoService';
 import { initBunnyVideoUpload, uploadVideoBinary, getBunnyHlsUrl, getBunnyThumbnailUrl, getBunnyPreviewUrl } from '../lib/bunny';
 import type { Category } from '../types';
