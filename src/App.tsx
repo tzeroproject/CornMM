@@ -22,7 +22,7 @@ const EditVideoPage=lazy(()=>import('./pages/EditVideoPage'));
 const WatchHistoryPage=lazy(()=>import('./pages/WatchHistoryPage'));
 const FavoritesPage=lazy(()=>import('./pages/FavoritesPage'));
 const SettingsPage=lazy(()=>import('./pages/SettingsPage'));
-const AdminDashboardPage=lazy(()=>import('./pages/AdminDashboardPage'));
+const AdminDashboardPage=lazy(()=>import('./pages/AdminDashboardPage').then((module)=>({default:module.AdminDashboardPage})));
 const RegisterPage=lazy(()=>import('./pages/RegisterPage'));
 const ForgotPasswordPage=lazy(()=>import('./pages/ForgotPasswordPage'));
 const PageLoader=()=> <div className="min-h-[40vh] flex items-center justify-center"><div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"/></div>;
