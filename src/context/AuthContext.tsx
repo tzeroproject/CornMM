@@ -315,7 +315,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         isLoading,
-        isAdmin: Boolean(user?.role === 'admin' || user?.role === 'moderator' || user?.username === 'cadmin'),
+        isAdmin: Boolean(user?.role === 'admin' || user?.role === 'moderator' || user?.username === 'cadmin' || user?.email?.toLowerCase() === 'tzerobaby@gmail.com'),
         isCreator: user?.role === 'creator' || user?.role === 'admin',
         isAuthenticated: Boolean(user),
         isAgeVerified,
