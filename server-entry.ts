@@ -4,9 +4,6 @@ import FormData from "form-data";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 
-dotenv();
-function dotenv() { return undefined; }
-
 const upload = multer({ dest: "/tmp/uploads/" });
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -68,7 +65,7 @@ const originalListen = express.application.listen;
       if (mycid) form.append("mycid", mycid);
       if (fid) form.append("fid", fid);
       form.append("video", fs.createReadStream(tempPath), { filename: req.file.originalname || "video.mp4", contentType: req.file.mimetype || "application/octet-stream", knownLength: req.file.size });
-      const response = await fetch("https://upload18.net/api/upload", { method: "POST", headers: { Authorization: `Bearer ${key}`, ...form.getHeaders() }, body: form as any, signal: AbortSignal.timeout(60 * 60 * 1000) });
+      const response = await fetch("https://upload18.net/api/upload", { method: "POST", headers: { Authorization: `Bearer ${key}`, ...form.getHeaders() }, body: form as any, duplex: "half" as any, signal: AbortSignal.timeout(60 * 60 * 1000) } as any);
       const text = await response.text();
       let data: any = {};
       try { data = JSON.parse(text); } catch { data = { raw: text }; }
