@@ -78,14 +78,18 @@ const originalListen = express.application.listen;
       if (!key) return res.status(500).json({ error: "Upload18 is not configured. Set UPLOAD18_API_KEY on Railway." });
       if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
       tempPath = req.file.path;
+
+      // Upload18 requires a valid main category (CID). Use the known main category
+      // and intentionally omit MyCID because MyCID values are account-specific.
       const cid = String(process.env.UPLOAD18_CID || "15").trim();
-      const mycid = String(process.env.UPLOAD18_MYCID || "").trim();
       const fid = String(process.env.UPLOAD18_FID || "").trim();
       const form = new FormData();
       form.append("cid", cid);
-      if (mycid) form.append("mycid", mycid);
       if (fid) form.append("fid", fid);
-      form.append("video", fs.createReadStream(tempPath), { filename: req.file.originalname || "video.mp4", contentType: req.file.mimetype || "application/octet-stream" });
+      form.append("video", fs.createReadStream(tempPath), {
+        filename: req.file.originalname || "video.mp4",
+        contentType: req.file.mimetype || "application/octet-stream",
+      });
 
       const { response, body } = await new Promise<{ response: any; body: string }>((resolve, reject) => {
         postUpload18(form, (error, upstreamResponse, upstreamBody) => {
@@ -103,17 +107,40 @@ const originalListen = express.application.listen;
       let result = extractVideo(data);
       if (result.vid && (!result.embed || !result.thumbnail)) {
         try {
-          const detailRes = await fetch(`https://upload18.net/api/getvideodetail/${encodeURIComponent(result.vid)}`, { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000) });
-          if (detailRes.ok) result = { ...result, ...Object.fromEntries(Object.entries(extractVideo(await detailRes.json())).filter(([, v]) => v)) };
+          const detailRes = await fetch(`https://upload18.net/api/getvideodetail/${encodeURIComponent(result.vid)}`, {
+            headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+            signal: AbortSignal.timeout(30000),
+          });
+          if (detailRes.ok) {
+            result = {
+              ...result,
+              ...Object.fromEntries(Object.entries(extractVideo(await detailRes.json())).filter(([, v]) => v)),
+            };
+          }
         } catch {}
       }
+
       if (!result.vid) return res.status(502).json({ error: "Upload18 did not return a video ID", details: data });
       const playUrl = result.link || `https://upload18.net/play/${encodeURIComponent(result.vid)}`;
       const embedUrl = result.embed || playUrl;
-      res.json({ success: true, provider: "upload18", vid: result.vid, videoId: result.vid, embedUrl, videoUrl: playUrl, thumbnailUrl: result.thumbnail || "", status: data?.status ?? data?.data?.status ?? null, raw: data });
+      res.json({
+        success: true,
+        provider: "upload18",
+        vid: result.vid,
+        videoId: result.vid,
+        embedUrl,
+        videoUrl: playUrl,
+        thumbnailUrl: result.thumbnail || "",
+        status: data?.status ?? data?.data?.status ?? null,
+        raw: data,
+      });
     } catch (e: any) {
       console.error("[Upload18] proxy upload failed:", e);
-      res.status(502).json({ error: "Upload18 upload failed", details: e?.message || String(e), cause: e?.cause?.code || e?.cause?.message || null });
+      res.status(502).json({
+        error: "Upload18 upload failed",
+        details: e?.message || String(e),
+        cause: e?.cause?.code || e?.cause?.message || null,
+      });
     } finally {
       if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} }
     }
