@@ -7,6 +7,11 @@ import type { Category } from '../types';
 
 type UploadMode = 'bunny' | 'uqload' | 'embed';
 const getEmbedSource = (value: string) => { const trimmed = value.trim(); const iframeMatch = trimmed.match(/<iframe[^>]+src=["']([^"']+)["']/i); return iframeMatch?.[1] || trimmed; };
+const extractUqloadFileCode = (value: string) => {
+  const source = getEmbedSource(value);
+  const match = source.match(/uqload\.vc\/(?:e\/)?([a-zA-Z0-9]+)(?:\.html)?/i);
+  return match?.[1] || null;
+};
 const extractUqloadFile = (payload: any) => { const file = payload?.files?.[0] || payload?.result?.[0] || payload?.result || payload?.file || payload; return { fileCode: file?.filecode || file?.fileCode || payload?.filecode || payload?.fileCode || null, thumbnailUrl: file?.player_img || file?.playerImg || file?.thumbnail || file?.thumbnail_url || file?.snapshot || file?.snapshot_url || payload?.player_img || payload?.thumbnail_url || null }; };
 
 export default function UploadPage() {
@@ -35,7 +40,22 @@ export default function UploadPage() {
       if (uploadMode === 'embed') {
         if (!isAdmin) throw new Error('Admin access required for embed uploads.');
         const source = getEmbedSource(embedUrl); if (!/^https?:\/\//i.test(source)) throw new Error('Please enter a valid HTTP(S) embed URL or iframe code.');
-        await videoService.createVideo({ title: title.trim(), description: description.trim(), category_id: categoryId || undefined, creator_id: user.id, video_url: source, thumbnail_url: '', preview_animation_url: '', provider: 'embed', is_published: true }); setSuccess('Embed video added successfully.');
+        const uqloadFileCode = extractUqloadFileCode(source);
+        const isUqload = /uqload\.vc/i.test(source) && Boolean(uqloadFileCode);
+        await videoService.createVideo({
+          title: title.trim(),
+          description: description.trim(),
+          category_id: categoryId || undefined,
+          creator_id: user.id,
+          video_url: source,
+          thumbnail_url: isUqload ? `/api/uqload/thumbnail/${encodeURIComponent(uqloadFileCode!)}` : '',
+          preview_animation_url: '',
+          provider: isUqload ? 'uqload' : 'embed',
+          provider_id: isUqload ? uqloadFileCode! : undefined,
+          uqload_filecode: isUqload ? uqloadFileCode! : undefined,
+          is_published: true,
+        });
+        setSuccess(isUqload ? 'UQLOAD embed added with automatic thumbnail.' : 'Embed video added successfully.');
       } else if (uploadMode === 'bunny') {
         if (!selectedFile) throw new Error('Please select a video file.');
         const upload = await initBunnyVideoUpload(title.trim()); await uploadVideoBinary(upload.proxyUploadUrl, selectedFile); const videoId = upload.videoId;
