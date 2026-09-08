@@ -62,12 +62,17 @@ const originalListen = express.application.listen;
       const cid = String(process.env.UPLOAD18_CID || "15").trim();
       const mycid = String(process.env.UPLOAD18_MYCID || "").trim();
       const fid = String(process.env.UPLOAD18_FID || "").trim();
+      if (!cid) return res.status(500).json({ error: "Upload18 CID is empty. Set UPLOAD18_CID on Railway." });
       const form = new FormData();
       form.append("cid", cid);
       if (mycid) form.append("mycid", mycid);
       if (fid) form.append("fid", fid);
       form.append("video", fs.createReadStream(tempPath), { filename: req.file.originalname || "video.mp4", contentType: req.file.mimetype || "application/octet-stream", knownLength: req.file.size });
-      const response = await fetch("https://upload18.net/api/upload", { method: "POST", headers: { Authorization: `Bearer ${key}`, ...form.getHeaders() }, body: form as any, duplex: "half" as any, signal: AbortSignal.timeout(60 * 60 * 1000) } as any);
+      const contentLength = await new Promise<number>((resolve, reject) => form.getLength((err, length) => err ? reject(err) : resolve(length)));
+      const uploadUrl = new URL("https://upload18.net/api/upload");
+      uploadUrl.searchParams.set("cid", cid);
+      if (mycid) uploadUrl.searchParams.set("mycid", mycid);
+      const response = await fetch(uploadUrl, { method: "POST", headers: { Authorization: `Bearer ${key}`, ...form.getHeaders(), "Content-Length": String(contentLength) }, body: form as any, duplex: "half" as any, signal: AbortSignal.timeout(60 * 60 * 1000) } as any);
       const text = await response.text();
       let data: any = {};
       try { data = JSON.parse(text); } catch { data = { raw: text }; }
