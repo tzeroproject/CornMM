@@ -7,7 +7,7 @@ import type { Category } from '../types';
 
 type UploadMode = 'bunny' | 'uqload' | 'embed';
 const getEmbedSource = (value: string) => { const trimmed = value.trim(); const iframeMatch = trimmed.match(/<iframe[^>]+src=["']([^"']+)["']/i); return iframeMatch?.[1] || trimmed; };
-const extractUqloadFileCode = (payload: any) => { const file = payload?.files?.[0]; return file?.filecode || file?.fileCode || payload?.filecode || payload?.fileCode || null; };
+const extractUqloadFile = (payload: any) => { const file = payload?.files?.[0] || payload?.result?.[0] || payload?.result || payload?.file || payload; return { fileCode: file?.filecode || file?.fileCode || payload?.filecode || payload?.fileCode || null, thumbnailUrl: file?.player_img || file?.playerImg || file?.thumbnail || file?.thumbnail_url || file?.snapshot || file?.snapshot_url || payload?.player_img || payload?.thumbnail_url || null }; };
 
 export default function UploadPage() {
   const { user, isAdmin } = useAuth();
@@ -45,8 +45,8 @@ export default function UploadPage() {
         const session = await import('../lib/supabase').then(({ supabase }) => supabase.auth.getSession()); const token = session.data.session?.access_token; if (!token) throw new Error('Your session has expired. Please sign in again.');
         const formData = new FormData(); formData.append('file', selectedFile); formData.append('title', title.trim());
         const response = await new Promise<any>((resolve, reject) => { const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/uqload/proxy-upload'); xhr.setRequestHeader('Authorization', `Bearer ${token}`); xhr.onload = () => { try { const data = JSON.parse(xhr.responseText || '{}'); if (xhr.status >= 200 && xhr.status < 300) resolve(data); else reject(new Error(data?.error || data?.message || `UQLOAD upload failed (${xhr.status}).`)); } catch { reject(new Error(`UQLOAD upload failed (${xhr.status}).`)); } }; xhr.onerror = () => reject(new Error('Network error while uploading to UQLOAD.')); xhr.send(formData); });
-        const fileCode = extractUqloadFileCode(response); if (!fileCode) throw new Error('UQLOAD did not return a file code.');
-        await videoService.createVideo({ title: title.trim(), description: description.trim(), category_id: categoryId || undefined, creator_id: user.id, video_url: `https://uqload.vc/e/${fileCode}`, thumbnail_url: '', preview_animation_url: '', provider: 'uqload', provider_id: fileCode, is_published: true }); setSuccess('UQLOAD upload completed successfully.');
+        const { fileCode, thumbnailUrl } = extractUqloadFile(response); if (!fileCode) throw new Error('UQLOAD did not return a file code.');
+        await videoService.createVideo({ title: title.trim(), description: description.trim(), category_id: categoryId || undefined, creator_id: user.id, video_url: `https://uqload.vc/e/${fileCode}`, thumbnail_url: thumbnailUrl || `/api/uqload/thumbnail/${encodeURIComponent(fileCode)}`, preview_animation_url: '', provider: 'uqload', provider_id: fileCode, is_published: true }); setSuccess('UQLOAD upload completed successfully.');
       }
       setTitle(''); setDescription(''); setCategoryId(''); setSelectedFile(null); setEmbedUrl('');
     } catch (err) { setError(err instanceof Error ? err.message : 'Upload failed.'); } finally { setIsUploading(false); }
