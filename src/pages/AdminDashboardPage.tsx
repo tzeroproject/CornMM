@@ -40,7 +40,32 @@ export const AdminDashboardPage: React.FC = () => {
   const [auditLogs, setAuditLogs] = useState<AdminAction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingThumbnails, setIsSyncingThumbnails] = useState(false);
   
+  const handleSyncUqloadThumbnails = async () => {
+    setIsSyncingThumbnails(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Your admin session is missing. Please sign in again.');
+      const response = await fetch('/api/admin/uqload/sync-thumbnails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Thumbnail sync failed');
+      showToast({
+        type: 'success',
+        title: 'UQLOAD Thumbnails Synced',
+        message: `Scanned ${result.scanned}, updated ${result.updated}, skipped ${result.skipped}, failed ${result.failed}.`,
+      });
+      await loadBunnyVideos();
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Thumbnail Sync Failed', message: err.message });
+    } finally {
+      setIsSyncingThumbnails(false);
+    }
+  };
+
   const handleSyncBunny = async () => {
     if (!user) return;
     setIsSyncing(true);
@@ -204,6 +229,14 @@ export const AdminDashboardPage: React.FC = () => {
           >
             <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
             {isSyncing ? 'Syncing...' : 'Sync Bunny Videos'}
+          </button>
+          <button
+            onClick={handleSyncUqloadThumbnails}
+            disabled={isSyncingThumbnails}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono font-semibold hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3 h-3 ${isSyncingThumbnails ? 'animate-spin' : ''}`} />
+            {isSyncingThumbnails ? 'Syncing Thumbnails...' : 'Sync UQLOAD Thumbnails'}
           </button>
 
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono font-semibold">
