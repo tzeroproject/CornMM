@@ -62,17 +62,23 @@ const originalListen = express.application.listen;
       const cid = String(process.env.UPLOAD18_CID || "15").trim();
       const mycid = String(process.env.UPLOAD18_MYCID || "").trim();
       const fid = String(process.env.UPLOAD18_FID || "").trim();
-      if (!cid) return res.status(500).json({ error: "Upload18 CID is empty. Set UPLOAD18_CID on Railway." });
       const form = new FormData();
       form.append("cid", cid);
       if (mycid) form.append("mycid", mycid);
       if (fid) form.append("fid", fid);
-      form.append("video", fs.createReadStream(tempPath), { filename: req.file.originalname || "video.mp4", contentType: req.file.mimetype || "application/octet-stream", knownLength: req.file.size });
-      const contentLength = await new Promise<number>((resolve, reject) => form.getLength((err, length) => err ? reject(err) : resolve(length)));
-      const uploadUrl = new URL("https://upload18.net/api/upload");
-      uploadUrl.searchParams.set("cid", cid);
-      if (mycid) uploadUrl.searchParams.set("mycid", mycid);
-      const response = await fetch(uploadUrl, { method: "POST", headers: { Authorization: `Bearer ${key}`, ...form.getHeaders(), "Content-Length": String(contentLength) }, body: form as any, duplex: "half" as any, signal: AbortSignal.timeout(60 * 60 * 1000) } as any);
+      form.append("video", fs.createReadStream(tempPath), { filename: req.file.originalname || "video.mp4", contentType: req.file.mimetype || "application/octet-stream" });
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${key}`,
+        Accept: "application/json",
+        ...form.getHeaders(),
+      };
+      const response = await fetch("https://upload18.net/api/upload", {
+        method: "POST",
+        headers,
+        body: form as any,
+        duplex: "half" as any,
+        signal: AbortSignal.timeout(60 * 60 * 1000),
+      } as any);
       const text = await response.text();
       let data: any = {};
       try { data = JSON.parse(text); } catch { data = { raw: text }; }
@@ -90,7 +96,7 @@ const originalListen = express.application.listen;
       res.json({ success: true, provider: "upload18", vid: result.vid, videoId: result.vid, embedUrl, videoUrl: playUrl, thumbnailUrl: result.thumbnail || "", status: data?.status ?? data?.data?.status ?? null, raw: data });
     } catch (e: any) {
       console.error("[Upload18] proxy upload failed:", e);
-      res.status(502).json({ error: "Upload18 upload failed", details: e?.message || String(e) });
+      res.status(502).json({ error: "Upload18 upload failed", details: e?.message || String(e), cause: e?.cause?.code || e?.cause?.message || null });
     } finally {
       if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} }
     }
