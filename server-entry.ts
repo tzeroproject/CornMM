@@ -2,8 +2,10 @@ import express from "express";
 import multer from "multer";
 import FormData from "form-data";
 import fs from "fs";
+import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 
+dotenv.config();
 const upload = multer({ dest: "/tmp/uploads/" });
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
