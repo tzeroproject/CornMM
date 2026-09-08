@@ -69,6 +69,54 @@ app.put("/api/bunny/upload/:videoId", async (req, res) => { try { const bunny = 
 app.get("/api/bunny/status/:videoId", async (req, res) => { try { const bunny = bunnyConfig(); if (!bunny.apiKey || !bunny.libraryId) return res.status(500).json({ error: "Missing Bunny configuration" }); const response = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${encodeURIComponent(req.params.videoId)}`, { headers: { AccessKey: bunny.apiKey, Accept: "application/json" } }); if (!response.ok) return res.status(response.status).json({ error: "Unable to get Bunny status" }); const data: any = await response.json(); const statusMap: Record<number, string> = { 0:"created",1:"uploaded",2:"processing",3:"transcoding",4:"finished",5:"error",6:"failed" }; res.json({ videoId:req.params.videoId,status:data.status,statusText:statusMap[data.status]||"unknown",progress:data.encodeProgress||0,duration:data.length||0 }); } catch(e:any) { res.status(500).json({error:e?.message||"Bunny status failed"}); } });
 
 async function handleUqloadUpload(req: any, res: any) { const adminId = await requireAdmin(req, res); if (!adminId) return; let tempPath = ""; try { const key = String(process.env.UQLOAD_API_KEY || "").trim(); if (!key) return res.status(500).json({ error: "UQLOAD is not configured" }); if (!req.file) return res.status(400).json({ error: "No file uploaded" }); tempPath = req.file.path; const serverRes = await fetch(`https://uqload.vc/api/upload/server?key=${encodeURIComponent(key)}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(30000) }); const serverText = await serverRes.text(); let serverData: any; try { serverData = JSON.parse(serverText); } catch { serverData = null; } if (!serverRes.ok || Number(serverData?.status) !== 200 || !serverData?.result) return res.status(502).json({ error: "Failed to get UQLOAD upload server", details: serverData?.msg || serverText.slice(0, 2000) }); const target = new URL(String(serverData.result)); const form = new FormData(); form.append("key", key); form.append("file_title", String(req.body?.file_title || req.file.originalname || "Video").slice(0, 300)); form.append("html_redirect", "0"); form.append("file", fs.createReadStream(tempPath), { filename: req.file.originalname || "upload.mp4", contentType: req.file.mimetype || "application/octet-stream", knownLength: req.file.size }); const headers: Record<string, string> = { ...form.getHeaders(), Accept: "application/json" }; headers["Content-Length"] = String(await new Promise<number>((resolve, reject) => form.getLength((err, length) => err ? reject(err) : resolve(length)))); const uploadResult: any = await new Promise((resolve, reject) => { const client = target.protocol === "https:" ? require("https") : require("http"); const request = client.request(target, { method: "POST", headers, timeout: 30 * 60 * 1000 }, (response: any) => { let body = ""; response.setEncoding("utf8"); response.on("data", (chunk: string) => { body += chunk; }); response.on("end", () => { let parsed: any = null; try { parsed = JSON.parse(body); } catch {} if (response.statusCode < 200 || response.statusCode >= 300) return reject(new Error(`UQLOAD HTTP ${response.statusCode}: ${(parsed?.msg || parsed?.error || body).slice(0, 2000)}`)); if (!parsed) return reject(new Error(`UQLOAD returned invalid JSON: ${body.slice(0, 2000)}`)); resolve(parsed); }); }); request.on("timeout", () => request.destroy(new Error("UQLOAD upload timed out"))); request.on("error", reject); form.on("error", reject); form.pipe(request); }); res.json(uploadResult); } catch (e: any) { console.error("[UQLOAD] proxy upload failed:", e); res.status(502).json({ error: "UQLOAD upload failed", details: e?.message || String(e) }); } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } } }
+app.post("/api/admin/uqload/sync-thumbnails", async (req, res) => {
+  const adminId = await requireAdmin(req, res);
+  if (!adminId || !supabaseAdmin) return;
+  try {
+    const key = String(process.env.UQLOAD_API_KEY || "").trim();
+    if (!key) return res.status(500).json({ error: "UQLOAD is not configured" });
+    const { data: videos, error } = await supabaseAdmin
+      .from("videos")
+      .select("id,uqload_filecode,provider,provider_id,thumbnail_url")
+      .or("provider.eq.uqload,uqload_filecode.not.is.null")
+      .limit(50000);
+    if (error) return res.status(400).json({ error: error.message });
+    let scanned = 0, updated = 0, skipped = 0, failed = 0;
+    const failures: any[] = [];
+    for (const video of videos || []) {
+      const fileCode = String(video.uqload_filecode || (video.provider === "uqload" ? video.provider_id : "") || "").trim();
+      if (!fileCode) { skipped++; continue; }
+      scanned++;
+      try {
+        const infoRes = await fetch(`https://uqload.vc/api/file/info?key=${encodeURIComponent(key)}&file_code=${encodeURIComponent(fileCode)}`, { headers: { Accept: "application/json" } });
+        if (!infoRes.ok) throw new Error(`UQLOAD info HTTP ${infoRes.status}`);
+        const info: any = await infoRes.json();
+        const item = info?.result?.[0] || info?.result || {};
+        const thumbnail = item?.player_img || item?.playerImg || item?.thumbnail || item?.thumbnail_url || item?.snapshot || item?.snapshot_url;
+        if (!thumbnail) { skipped++; continue; }
+        if (String(video.thumbnail_url || "") === String(thumbnail)) { skipped++; continue; }
+        const { error: updateError } = await supabaseAdmin.from("videos").update({ thumbnail_url: String(thumbnail) }).eq("id", video.id);
+        if (updateError) throw updateError;
+        updated++;
+      } catch (e: any) {
+        failed++;
+        if (failures.length < 50) failures.push({ videoId: video.id, fileCode, error: e?.message || String(e) });
+      }
+    }
+    await supabaseAdmin.from("admin_actions").insert({
+      admin_id: adminId,
+      action: "sync_uqload_thumbnails",
+      target_type: "videos",
+      target_id: null,
+      target_name: "UQLOAD thumbnails",
+      details: { scanned, updated, skipped, failed }
+    }).then(() => undefined).catch(() => undefined);
+    res.json({ success: true, scanned, updated, skipped, failed, failures });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message || "UQLOAD thumbnail sync failed" });
+  }
+});
+
 app.get("/api/uqload/thumbnail/:fileCode", async (req, res) => {
   try {
     const key = String(process.env.UQLOAD_API_KEY || "").trim();
