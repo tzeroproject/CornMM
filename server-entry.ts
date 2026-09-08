@@ -49,6 +49,25 @@ function extractVideo(payload: any) {
   return { vid: vid ? String(vid) : "", embed: embed ? String(embed) : "", link: link ? String(link) : "", thumbnail: thumbnail ? String(thumbnail) : "" };
 }
 
+function postUpload18(form: FormData, callback: (error: any, response?: any, body?: string) => void) {
+  form.submit({
+    protocol: "https:",
+    host: "upload18.net",
+    path: "/api/upload",
+    headers: {
+      Authorization: `Bearer ${String(process.env.UPLOAD18_API_KEY || "").trim()}`,
+      Accept: "application/json",
+    },
+  }, (error: any, response: any) => {
+    if (error) return callback(error);
+    let body = "";
+    response.setEncoding("utf8");
+    response.on("data", (chunk: string) => { body += chunk; });
+    response.on("end", () => callback(null, response, body));
+    response.on("error", (err: any) => callback(err));
+  });
+}
+
 const originalListen = express.application.listen;
 (express.application as any).listen = function(this: any, ...args: any[]) {
   this.post("/api/upload18/proxy-upload", upload.single("file"), async (req: any, res: any) => {
@@ -67,22 +86,20 @@ const originalListen = express.application.listen;
       if (mycid) form.append("mycid", mycid);
       if (fid) form.append("fid", fid);
       form.append("video", fs.createReadStream(tempPath), { filename: req.file.originalname || "video.mp4", contentType: req.file.mimetype || "application/octet-stream" });
-      const headers: Record<string, string> = {
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-        ...form.getHeaders(),
-      };
-      const response = await fetch("https://upload18.net/api/upload", {
-        method: "POST",
-        headers,
-        body: form as any,
-        duplex: "half" as any,
-        signal: AbortSignal.timeout(60 * 60 * 1000),
-      } as any);
-      const text = await response.text();
+
+      const { response, body } = await new Promise<{ response: any; body: string }>((resolve, reject) => {
+        postUpload18(form, (error, upstreamResponse, upstreamBody) => {
+          if (error) return reject(error);
+          resolve({ response: upstreamResponse, body: upstreamBody || "" });
+        });
+      });
+
       let data: any = {};
-      try { data = JSON.parse(text); } catch { data = { raw: text }; }
-      if (!response.ok) return res.status(response.status).json({ error: "Upload18 upload failed", details: data });
+      try { data = JSON.parse(body); } catch { data = { raw: body }; }
+      if (!response || response.statusCode < 200 || response.statusCode >= 300) {
+        return res.status(response?.statusCode || 502).json({ error: "Upload18 upload failed", details: data });
+      }
+
       let result = extractVideo(data);
       if (result.vid && (!result.embed || !result.thumbnail)) {
         try {
