@@ -2,6 +2,7 @@ import express from "express";
 import multer from "multer";
 import FormData from "form-data";
 import fs from "fs";
+import https from "https";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 
@@ -50,21 +51,27 @@ function extractVideo(payload: any) {
 }
 
 function postUpload18(form: FormData, callback: (error: any, response?: any, body?: string) => void) {
-  form.submit({
-    protocol: "https:",
-    host: "upload18.net",
-    path: "/api/upload",
-    headers: {
-      Authorization: `Bearer ${String(process.env.UPLOAD18_API_KEY || "").trim()}`,
-      Accept: "application/json",
-    },
-  }, (error: any, response: any) => {
-    if (error) return callback(error);
-    let body = "";
-    response.setEncoding("utf8");
-    response.on("data", (chunk: string) => { body += chunk; });
-    response.on("end", () => callback(null, response, body));
-    response.on("error", (err: any) => callback(err));
+  form.getLength((lengthError: any, length: number) => {
+    if (lengthError) return callback(lengthError);
+
+    form.submit({
+      protocol: "https:",
+      host: "upload18.net",
+      path: "/api/upload",
+      headers: {
+        ...form.getHeaders(),
+        Authorization: `Bearer ${String(process.env.UPLOAD18_API_KEY || "").trim()}`,
+        Accept: "application/json",
+        "Content-Length": String(length),
+      },
+    }, (error: any, response: any) => {
+      if (error) return callback(error);
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk: string) => { body += chunk; });
+      response.on("end", () => callback(null, response, body));
+      response.on("error", (err: any) => callback(err));
+    });
   });
 }
 
@@ -79,8 +86,8 @@ const originalListen = express.application.listen;
       if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
       tempPath = req.file.path;
 
-      // Upload18 requires a valid main category (CID). Use the known main category
-      // and intentionally omit MyCID because MyCID values are account-specific.
+      // Upload18 requires a valid main category (CID). MyCID is intentionally omitted
+      // because it is account-specific. FID is sent only when explicitly configured.
       const cid = String(process.env.UPLOAD18_CID || "15").trim();
       const fid = String(process.env.UPLOAD18_FID || "").trim();
       const form = new FormData();
@@ -89,6 +96,7 @@ const originalListen = express.application.listen;
       form.append("video", fs.createReadStream(tempPath), {
         filename: req.file.originalname || "video.mp4",
         contentType: req.file.mimetype || "application/octet-stream",
+        knownLength: Number(req.file.size || 0) || undefined,
       });
 
       const { response, body } = await new Promise<{ response: any; body: string }>((resolve, reject) => {
@@ -100,8 +108,14 @@ const originalListen = express.application.listen;
 
       let data: any = {};
       try { data = JSON.parse(body); } catch { data = { raw: body }; }
+      console.log(`[Upload18] upstream HTTP ${response?.statusCode || "unknown"}: ${body.slice(0, 3000)}`);
+
       if (!response || response.statusCode < 200 || response.statusCode >= 300) {
-        return res.status(response?.statusCode || 502).json({ error: "Upload18 upload failed", details: data });
+        return res.status(502).json({
+          error: "Upload18 upload failed",
+          upstreamStatus: response?.statusCode || null,
+          details: data,
+        });
       }
 
       let result = extractVideo(data);
