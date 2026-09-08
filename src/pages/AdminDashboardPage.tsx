@@ -21,6 +21,8 @@ import { useNotification } from '../context/NotificationContext';
 import { Link, Navigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
+const PageLoader = () => <div className="min-h-[40vh] flex items-center justify-center"><div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" /></div>;
+
 export const AdminDashboardPage: React.FC = () => {
   const { user, isAdmin } = useAuth();
   const { showToast } = useNotification();
@@ -93,7 +95,8 @@ export const AdminDashboardPage: React.FC = () => {
 
   useEffect(() => {
     async function loadAdminData() {
-      if (!isAdmin) {
+      if (isLoading) { return <PageLoader />; }
+  if (!isAdmin) {
         setIsLoading(false);
         return;
       }
