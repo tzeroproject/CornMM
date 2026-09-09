@@ -19,10 +19,10 @@ import { TermsPage, PrivacyPage, DmcaPage, GuidelinesPage, ContactPage } from '.
 import EmbedPage from './pages/EmbedPage';
 const UploadPage = lazy(() => import('./pages/UploadPage'));
 const FileMoonUploadPage = lazy(() => import('./pages/FileMoonUploadPage'));
-const UserDashboardPage = lazy(() => import('./pages/UserDashboardPage'));
+const UserDashboardPage = lazy(() => import('./pages/UserDashboardPage').then((module) => ({ default: module.UserDashboardPage })));
 const EditVideoPage = lazy(() => import('./pages/EditVideoPage').then((module) => ({ default: module.EditVideoPage })));
-const WatchHistoryPage = lazy(() => import('./pages/WatchHistoryPage'));
-const FavoritesPage = lazy(() => import('./pages/FavoritesPage'));
+const WatchHistoryPage = lazy(() => import('./pages/WatchHistoryPage').then((module) => ({ default: module.WatchHistoryPage })));
+const FavoritesPage = lazy(() => import('./pages/FavoritesPage').then((module) => ({ default: module.FavoritesPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((module) => ({ default: module.SettingsPage })));
 const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage').then((module) => ({ default: module.AdminDashboardPage })));
 const RegisterPage = lazy(() => import('./pages/RegisterPage'));
