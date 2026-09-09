@@ -69,7 +69,92 @@ app.post("/api/bunny/create-video", async (req, res) => { try { const bunny = bu
 app.put("/api/bunny/upload/:videoId", async (req, res) => { try { const bunny = bunnyConfig(); if (!bunny.apiKey || !bunny.libraryId) return res.status(500).json({ error: "Missing Bunny configuration" }); const id = String(req.params.videoId); const response = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${encodeURIComponent(id)}`, { method: "PUT", headers: { AccessKey: bunny.apiKey, "Content-Type": req.headers["content-type"] || "application/octet-stream" }, body: req as any, duplex: "half" as any }); if (!response.ok) return res.status(response.status).json({ error: "Bunny upload failed", details: (await response.text()).slice(0, 5000) }); res.json({ success: true, videoId: id }); } catch (e: any) { res.status(500).json({ error: e?.message || "Bunny upload failed" }); } });
 app.get("/api/bunny/status/:videoId", async (req, res) => { try { const bunny = bunnyConfig(); if (!bunny.apiKey || !bunny.libraryId) return res.status(500).json({ error: "Missing Bunny configuration" }); const response = await fetch(`https://video.bunnycdn.com/library/${bunny.libraryId}/videos/${encodeURIComponent(req.params.videoId)}`, { headers: { AccessKey: bunny.apiKey, Accept: "application/json" } }); if (!response.ok) return res.status(response.status).json({ error: "Unable to get Bunny status" }); const data: any = await response.json(); const statusMap: Record<number, string> = { 0:"created",1:"uploaded",2:"processing",3:"transcoding",4:"finished",5:"error",6:"failed" }; res.json({ videoId:req.params.videoId,status:data.status,statusText:statusMap[data.status]||"unknown",progress:data.encodeProgress||0,duration:data.length||0 }); } catch(e:any) { res.status(500).json({error:e?.message||"Bunny status failed"}); } });
 
+async function handleDoodstreamUpload(req: any, res: any) {
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
+  let tempPath = "";
+  try {
+    const key = String(process.env.DOODSTREAM_API_KEY || "").trim();
+    if (!key) return res.status(500).json({ error: "DoodStream is not configured. Set DOODSTREAM_API_KEY on Railway." });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    tempPath = req.file.path;
+
+    const serverRes = await fetch(`https://doodapi.co/api/upload/server?key=${encodeURIComponent(key)}`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(30000),
+    });
+    const serverText = await serverRes.text();
+    let serverData: any = {};
+    try { serverData = JSON.parse(serverText); } catch {}
+    const targetUrl = String(serverData?.result || "").trim();
+    if (!serverRes.ok || Number(serverData?.status) !== 200 || !targetUrl) {
+      return res.status(502).json({
+        error: "Failed to get DoodStream upload server",
+        details: serverData?.msg || serverText.slice(0, 3000),
+      });
+    }
+
+    const form = new FormData();
+    form.append("api_key", key);
+    form.append("file", fs.createReadStream(tempPath), {
+      filename: req.file.originalname || "video.mp4",
+      contentType: req.file.mimetype || "application/octet-stream",
+      knownLength: Number(req.file.size || 0) || undefined,
+    });
+    if (req.body?.title) form.append("file_title", String(req.body.title).slice(0, 300));
+
+    const headers: Record<string, string> = { ...form.getHeaders(), Accept: "application/json" };
+    headers["Content-Length"] = String(await new Promise<number>((resolve, reject) =>
+      form.getLength((err, length) => err ? reject(err) : resolve(length))
+    ));
+
+    const uploadResult: any = await new Promise((resolve, reject) => {
+      const target = new URL(targetUrl);
+      const client = target.protocol === "https:" ? require("https") : require("http");
+      const request = client.request(target, { method: "POST", headers, timeout: 30 * 60 * 1000 }, (response: any) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => { body += chunk; });
+        response.on("end", () => {
+          let parsed: any = null;
+          try { parsed = JSON.parse(body); } catch {}
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            return reject(new Error(`DoodStream HTTP ${response.statusCode}: ${(parsed?.msg || parsed?.error || body).slice(0, 3000)}`));
+          }
+          if (!parsed) return reject(new Error(`DoodStream returned invalid JSON: ${body.slice(0, 3000)}`));
+          resolve(parsed);
+        });
+      });
+      request.on("timeout", () => request.destroy(new Error("DoodStream upload timed out")));
+      request.on("error", reject);
+      form.on("error", reject);
+      form.pipe(request);
+    });
+
+    const item = uploadResult?.result?.[0] || uploadResult?.result || {};
+    const fileCode = String(item?.filecode || item?.file_code || uploadResult?.filecode || "").trim();
+    if (!fileCode) return res.status(502).json({ error: "DoodStream did not return a file code", details: uploadResult });
+
+    res.json({
+      success: true,
+      provider: "doodstream",
+      fileCode,
+      providerId: fileCode,
+      embedUrl: item?.protected_embed || item?.embed_url || `https://dood.to/e/${encodeURIComponent(fileCode)}`,
+      videoUrl: item?.protected_embed || item?.embed_url || `https://dood.to/e/${encodeURIComponent(fileCode)}`,
+      thumbnailUrl: item?.single_img || item?.splash_img || item?.thumb_img || "",
+      raw: uploadResult,
+    });
+  } catch (e: any) {
+    console.error("[DoodStream] proxy upload failed:", e);
+    res.status(502).json({ error: "DoodStream upload failed", details: e?.message || String(e), cause: e?.cause?.code || e?.cause?.message || null });
+  } finally {
+    if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} }
+  }
+}
+
 async function handleUqloadUpload(req: any, res: any) { const adminId = await requireAdmin(req, res); if (!adminId) return; let tempPath = ""; try { const key = String(process.env.UQLOAD_API_KEY || "").trim(); if (!key) return res.status(500).json({ error: "UQLOAD is not configured" }); if (!req.file) return res.status(400).json({ error: "No file uploaded" }); tempPath = req.file.path; const serverRes = await fetch(`https://uqload.vc/api/upload/server?key=${encodeURIComponent(key)}`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(30000) }); const serverText = await serverRes.text(); let serverData: any; try { serverData = JSON.parse(serverText); } catch { serverData = null; } if (!serverRes.ok || Number(serverData?.status) !== 200 || !serverData?.result) return res.status(502).json({ error: "Failed to get UQLOAD upload server", details: serverData?.msg || serverText.slice(0, 2000) }); const target = new URL(String(serverData.result)); const form = new FormData(); form.append("key", key); form.append("file_title", String(req.body?.file_title || req.file.originalname || "Video").slice(0, 300)); form.append("html_redirect", "0"); form.append("file", fs.createReadStream(tempPath), { filename: req.file.originalname || "upload.mp4", contentType: req.file.mimetype || "application/octet-stream", knownLength: req.file.size }); const headers: Record<string, string> = { ...form.getHeaders(), Accept: "application/json" }; headers["Content-Length"] = String(await new Promise<number>((resolve, reject) => form.getLength((err, length) => err ? reject(err) : resolve(length)))); const uploadResult: any = await new Promise((resolve, reject) => { const client = target.protocol === "https:" ? require("https") : require("http"); const request = client.request(target, { method: "POST", headers, timeout: 30 * 60 * 1000 }, (response: any) => { let body = ""; response.setEncoding("utf8"); response.on("data", (chunk: string) => { body += chunk; }); response.on("end", () => { let parsed: any = null; try { parsed = JSON.parse(body); } catch {} if (response.statusCode < 200 || response.statusCode >= 300) return reject(new Error(`UQLOAD HTTP ${response.statusCode}: ${(parsed?.msg || parsed?.error || body).slice(0, 2000)}`)); if (!parsed) return reject(new Error(`UQLOAD returned invalid JSON: ${body.slice(0, 2000)}`)); resolve(parsed); }); }); request.on("timeout", () => request.destroy(new Error("UQLOAD upload timed out"))); request.on("error", reject); form.on("error", reject); form.pipe(request); }); res.json(uploadResult); } catch (e: any) { console.error("[UQLOAD] proxy upload failed:", e); res.status(502).json({ error: "UQLOAD upload failed", details: e?.message || String(e) }); } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } } }
+app.post("/api/doodstream/proxy-upload", upload.single("file"), handleDoodstreamUpload);
 app.post("/api/admin/uqload/sync-thumbnails", async (req, res) => {
   const adminId = await requireAdmin(req, res);
   if (!adminId || !supabaseAdmin) return;
