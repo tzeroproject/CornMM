@@ -54,9 +54,11 @@ export const VideoPlayer:React.FC<VideoPlayerProps>=({video,onProgress,onComplet
  useEffect(()=>{const f=()=>setIsFullscreen(Boolean(document.fullscreenElement));document.addEventListener('fullscreenchange',f);return()=>document.removeEventListener('fullscreenchange',f)},[]);
  const formatTime=(s:number)=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
- // Only use an iframe for known embed providers. Direct MP4/WebM/HLS URLs use CornMM's native player so audio is controllable.
- const isUqloadEmbed=!!video.video_url&&(/uqload\.vc\/e\//i.test(video.video_url)||String(video.provider||'').toLowerCase()==='uqload');
- const isExternal=isUqloadEmbed&&(!video.bunny_video_id||video.bunny_video_id==='embed');
+ // Use provider embed if the video is an external embed. Direct MP4/WebM/HLS URLs use CornMM's native player.
+ const provider=String(video.provider||'').toLowerCase();
+ const isUqloadEmbed=!!video.video_url&&(/uqload\.vc\/e\//i.test(video.video_url)||provider==='uqload');
+ const isDoodstreamEmbed=provider==='doodstream' || /dood(?:\.to|\.la|\.so)\/e\//i.test(String(video.video_url||''));
+ const isExternal=(isUqloadEmbed||isDoodstreamEmbed)&&(!video.bunny_video_id||video.bunny_video_id==='embed');
 
  if(isExternal||useBunnyIframeEmbed){
   let src=isExternal?video.video_url:getBunnyIframeUrl({videoId:video.bunny_video_id!,autoplay:hasStarted});
