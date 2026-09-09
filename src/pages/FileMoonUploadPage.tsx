@@ -44,7 +44,17 @@ export default function FileMoonUploadPage() {
         const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/filemoon/proxy-upload');
         xhr.setRequestHeader('Authorization', 'Bearer ' + token);
         xhr.upload.onprogress = e => { if (e.lengthComputable) setProgress(Math.round(e.loaded / e.total * 100)); };
-        xhr.onload = () => { try { const data = JSON.parse(xhr.responseText || '{}'); if (xhr.status >= 200 && xhr.status < 300) resolve(data); else reject(new Error(data?.error || 'FileMoon upload failed (' + xhr.status + ').')); } catch { reject(new Error('FileMoon upload failed (' + xhr.status + ').')); } };
+        xhr.onload = () => {
+          let data: any = {};
+          try { data = JSON.parse(xhr.responseText || '{}'); } catch { data = {}; }
+          if (xhr.status >= 200 && xhr.status < 300) return resolve(data);
+          const parts = [data?.error || `FileMoon upload failed (${xhr.status}).`];
+          if (data?.upstreamStatus) parts.push(`Upstream HTTP ${data.upstreamStatus}`);
+          if (data?.requestId) parts.push(`Request ID ${data.requestId}`);
+          const detailMessage = data?.details?.error?.message;
+          if (detailMessage && detailMessage !== data?.error) parts.push(detailMessage);
+          reject(new Error(parts.join(' — ')));
+        };
         xhr.onerror = () => reject(new Error('Network error while uploading to FileMoon.'));
         xhr.send(form);
       });
@@ -72,7 +82,7 @@ export default function FileMoonUploadPage() {
         <p className="text-xs text-zinc-400 mt-1">MP4, WebM, MOV, or MKV up to 1GB</p>
       </div>
       {uploading && <div className="text-sm text-zinc-300">Uploading to FileMoon... {progress}%</div>}
-      {error && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm">{error}</div>}
+      {error && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm break-words">{error}</div>}
       {success && <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">{success}</div>}
       <button disabled={uploading} className="w-full py-3 rounded-xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">{uploading && <Loader2 className="w-4 h-4 animate-spin" />}{uploading ? 'Uploading...' : 'Upload to FileMoon'}</button>
     </form>
