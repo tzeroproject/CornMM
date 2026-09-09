@@ -1,45 +1,56 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Grid, Loader2 } from 'lucide-react';
+import { ArrowLeft, Grid, ChevronLeft, ChevronRight } from 'lucide-react';
 import { videoService } from '../services/videoService';
 import { Category, Video } from '../types';
 import { VideoGrid } from '../components/video/VideoGrid';
 import { SEO } from '../components/SEO';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 export const CategoryPage: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
   const [category, setCategory] = useState<Category | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setPage(1);
+  }, [slug]);
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       setIsLoading(true);
       setError(null);
-      setVideos([]);
-      setHasMore(true);
       try {
         const categories = await videoService.getCategories();
         const found = categories.find((item) => item.slug?.toLowerCase() === slug?.toLowerCase());
         if (!found) {
           if (!cancelled) {
             setCategory(null);
+            setVideos([]);
+            setTotal(0);
             setError('Category not found');
           }
           return;
         }
-        const result = await videoService.getVideos({ categoryId: found.id, page: 1, pageSize: PAGE_SIZE, sortBy: 'latest' });
+
+        const result = await videoService.getVideos({
+          categoryId: found.id,
+          page,
+          pageSize: PAGE_SIZE,
+          sortBy: 'latest',
+        });
+
         if (!cancelled) {
           setCategory(found);
           setVideos(result.videos);
-          setHasMore(result.videos.length < result.total);
+          setTotal(result.total);
         }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load category');
@@ -47,34 +58,18 @@ export const CategoryPage: React.FC = () => {
         if (!cancelled) setIsLoading(false);
       }
     }
+
     load();
     return () => { cancelled = true; };
-  }, [slug]);
+  }, [slug, page]);
 
-  const loadMore = useCallback(async () => {
-    if (!category || isLoading || isLoadingMore || !hasMore) return;
-    setIsLoadingMore(true);
-    try {
-      const nextPage = Math.floor(videos.length / PAGE_SIZE) + 1;
-      const result = await videoService.getVideos({ categoryId: category.id, page: nextPage, pageSize: PAGE_SIZE, sortBy: 'latest' });
-      setVideos((current) => [...current, ...result.videos]);
-      setHasMore(videos.length + result.videos.length < result.total);
-    } catch (err) {
-      console.error('Failed to load more category videos:', err);
-    } finally {
-      setIsLoadingMore(false);
-    }
-  }, [category, hasMore, isLoading, isLoadingMore, videos.length]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  useEffect(() => {
-    const node = sentinelRef.current;
-    if (!node) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0]?.isIntersecting) loadMore();
-    }, { rootMargin: '600px' });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [loadMore]);
+  const changePage = (nextPage: number) => {
+    const safePage = Math.min(Math.max(nextPage, 1), totalPages);
+    setPage(safePage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   if (error || (!isLoading && !category)) {
     return (
@@ -107,13 +102,49 @@ export const CategoryPage: React.FC = () => {
         </div>
       </div>
 
-      <VideoGrid videos={videos} isLoading={isLoading} emptyTitle="No videos in this category" emptyDescription="Published videos will appear here when they are available." />
+      <VideoGrid
+        videos={videos}
+        isLoading={isLoading}
+        emptyTitle="No videos in this category"
+        emptyDescription="Published videos will appear here when they are available."
+      />
 
-      <div ref={sentinelRef} className="h-16 flex items-center justify-center">
-        {isLoadingMore && <Loader2 className="w-5 h-5 text-amber-400 animate-spin" />}
-        {!isLoadingMore && hasMore && <span className="text-[11px] text-zinc-600">Scroll for more</span>}
-        {!isLoadingMore && !hasMore && videos.length > 0 && <span className="text-[11px] text-zinc-600">You reached the end</span>}
-      </div>
+      {!isLoading && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <button
+            type="button"
+            onClick={() => changePage(page - 1)}
+            disabled={page === 1}
+            className="w-9 h-9 rounded-lg border border-white/10 bg-[#0a0a0a] text-zinc-300 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:border-amber-500/40 hover:text-amber-400 transition-colors"
+            aria-label="Previous page"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
+            <button
+              key={pageNumber}
+              type="button"
+              onClick={() => changePage(pageNumber)}
+              className={`min-w-9 h-9 px-2 rounded-lg border text-xs font-semibold transition-colors ${
+                pageNumber === page
+                  ? 'bg-amber-500 text-black border-amber-500'
+                  : 'bg-[#0a0a0a] text-zinc-400 border-white/10 hover:border-amber-500/40 hover:text-white'
+              }`}
+            >
+              {pageNumber}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => changePage(page + 1)}
+            disabled={page === totalPages}
+            className="w-9 h-9 rounded-lg border border-white/10 bg-[#0a0a0a] text-zinc-300 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:border-amber-500/40 hover:text-amber-400 transition-colors"
+            aria-label="Next page"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
