@@ -1,133 +1,177 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Upload, X, Sparkles, Link as LinkIcon, Loader2 } from 'lucide-react';
+import { Upload, X, Link as LinkIcon, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { videoService } from '../services/videoService';
-import { initBunnyVideoUpload, uploadVideoBinary, getBunnyHlsUrl, getBunnyThumbnailUrl, getBunnyPreviewUrl } from '../lib/bunny';
 import type { Category } from '../types';
 
-type UploadMode = 'bunny' | 'uqload' | 'upload18' | 'doodstream' | 'filemoon' | 'embed';
-const getEmbedSource = (value: string) => { const trimmed = value.trim(); const iframeMatch = trimmed.match(/<iframe[^>]+src=["']([^"']+)["']/i); return iframeMatch?.[1] || trimmed; };
-const extractUqloadFileCode = (value: string) => { const source = getEmbedSource(value); const match = source.match(/uqload\.vc\/(?:e\/)?([a-zA-Z0-9]+)(?:\.html)?/i); return match?.[1] || null; };
-const extractUqloadFile = (payload: any) => { const file = payload?.files?.[0] || payload?.result?.[0] || payload?.result || payload?.file || payload; return { fileCode: file?.filecode || file?.fileCode || payload?.filecode || payload?.fileCode || null, thumbnailUrl: file?.player_img || file?.playerImg || file?.thumbnail || file?.thumbnail_url || file?.snapshot || file?.snapshot_url || payload?.player_img || payload?.thumbnail_url || null }; };
+type UploadMode = 'uqload' | 'doodstream' | 'filemoon' | 'streamtape';
+
+const getEmbedSource = (value: string) => {
+  const trimmed = value.trim();
+  const iframeMatch = trimmed.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+  return iframeMatch?.[1] || trimmed;
+};
+
+const extractUqloadFileCode = (value: string) => {
+  const source = getEmbedSource(value);
+  const match = source.match(/uqload\.vc\/(?:e\/)?([a-zA-Z0-9]+)(?:\.html)?/i);
+  return match?.[1] || null;
+};
+
+const extractUqloadFile = (payload: any) => {
+  const file = payload?.files?.[0] || payload?.result?.[0] || payload?.result || payload?.file || payload;
+  return {
+    fileCode: file?.filecode || file?.fileCode || payload?.filecode || payload?.fileCode || null,
+    thumbnailUrl: file?.player_img || file?.playerImg || file?.thumbnail || file?.thumbnail_url || file?.snapshot || file?.snapshot_url || payload?.player_img || payload?.thumbnail_url || null,
+  };
+};
+
+const extractStreamtapeId = (value: string) => {
+  const source = getEmbedSource(value);
+  const match = source.match(/streamtape\.com\/(?:e|v)\/([^/?#"']+)/i);
+  return match?.[1] || null;
+};
 
 export default function UploadPage() {
   const { user, isAdmin } = useAuth();
-  const [uploadMode, setUploadMode] = useState<UploadMode>('bunny');
+  const [uploadMode, setUploadMode] = useState<UploadMode>('uqload');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [embedUrl, setEmbedUrl] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [embedLink, setEmbedLink] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => { videoService.getCategories().then(setCategories).catch(() => setCategories([])); }, []);
-  const handleFileSelect = (file?: File) => { setError(''); setSuccess(''); if (!file) return; if (!file.type.startsWith('video/')) { setError('Please select a valid video file.'); return; } if (file.size > 1024 * 1024 * 1024) { setError('Video file must be 1GB or smaller.'); return; } setSelectedFile(file); };
-  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => { event.preventDefault(); setIsDragging(false); handleFileSelect(event.dataTransfer.files?.[0]); };
-  const formatUpload18Error = (data: any, status: number) => {
-    const details = data?.details;
-    let detailText = '';
-    if (typeof details === 'string') detailText = details;
-    else if (details?.message) detailText = String(details.message);
-    else if (details?.error) detailText = typeof details.error === 'string' ? details.error : JSON.stringify(details.error);
-    else if (details?.raw) detailText = String(details.raw);
-    else if (details && typeof details === 'object') detailText = JSON.stringify(details);
-    return [data?.error || data?.message || `Upload18 upload failed (${status}).`, detailText].filter(Boolean).join(': ');
+
+  const handleFileSelect = (file?: File) => {
+    setError(''); setSuccess(''); setEmbedLink('');
+    if (!file) return;
+    if (!file.type.startsWith('video/')) { setError('Please select a valid video file.'); return; }
+    if (file.size > 1024 * 1024 * 1024) { setError('Video file must be 1GB or smaller.'); return; }
+    setSelectedFile(file);
   };
-  const uploadToUpload18 = async (file: File, token: string) => {
-    const formData = new FormData(); formData.append('file', file); formData.append('title', title.trim());
-    const response = await new Promise<any>((resolve, reject) => { const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/upload18/proxy-upload'); xhr.setRequestHeader('Authorization', `Bearer ${token}`); xhr.upload.onprogress = (event) => { if (event.lengthComputable) setSuccess(`Uploading to Upload18... ${Math.round((event.loaded / event.total) * 100)}%`); }; xhr.onload = () => { try { const data = JSON.parse(xhr.responseText || '{}'); if (xhr.status >= 200 && xhr.status < 300) resolve(data); else reject(new Error(formatUpload18Error(data, xhr.status))); } catch { reject(new Error(`Upload18 upload failed (${xhr.status}).`)); } }; xhr.onerror = () => reject(new Error('Network error while uploading to Upload18.')); xhr.send(formData); });
-    if (!response?.vid && !response?.videoId) throw new Error('Upload18 did not return a video ID.');
-    return response;
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault(); setIsDragging(false); handleFileSelect(event.dataTransfer.files?.[0]);
   };
-  const uploadToFileMoon = async (file: File, token: string) => {
-    const formData = new FormData(); formData.append('file', file); formData.append('title', title.trim());
-    const response = await new Promise<any>((resolve, reject) => { const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/filemoon/proxy-upload'); xhr.setRequestHeader('Authorization', `Bearer ${token}`); xhr.upload.onprogress = (event) => { if (event.lengthComputable) setSuccess(`Uploading to FileMoon... ${Math.round((event.loaded / event.total) * 100)}%`); }; xhr.onload = () => { try { const data = JSON.parse(xhr.responseText || '{}'); if (xhr.status >= 200 && xhr.status < 300) resolve(data); else reject(new Error(data?.error || data?.message || `FileMoon upload failed (${xhr.status}).`)); } catch { reject(new Error(`FileMoon upload failed (${xhr.status}).`)); } }; xhr.onerror = () => reject(new Error('Network error while uploading to FileMoon.')); xhr.send(formData); });
-    const fileId = String(response?.fileId || response?.providerId || '');
-    if (!fileId) throw new Error('FileMoon did not return a file ID.');
-    return { ...response, fileId };
+
+  const uploadMultipart = async (endpoint: string, token: string, providerName: string) => {
+    if (!selectedFile) throw new Error('Please select a video file.');
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    formData.append('title', title.trim());
+    return await new Promise<any>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', endpoint);
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) setSuccess(`Uploading to ${providerName}... ${Math.round((event.loaded / event.total) * 100)}%`);
+      };
+      xhr.onload = () => {
+        try {
+          const data = JSON.parse(xhr.responseText || '{}');
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+          else reject(new Error(data?.error || data?.message || `${providerName} upload failed (${xhr.status}).`));
+        } catch { reject(new Error(`${providerName} upload failed (${xhr.status}).`)); }
+      };
+      xhr.onerror = () => reject(new Error(`Network error while uploading to ${providerName}.`));
+      xhr.send(formData);
+    });
   };
+
   const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault(); setError(''); setSuccess('');
+    event.preventDefault(); setError(''); setSuccess(''); setEmbedLink('');
     if (!user) { setError('Please sign in before uploading a video.'); return; }
+    if (!isAdmin) { setError('Admin access required for video uploads.'); return; }
     if (!title.trim()) { setError('Please enter a title.'); return; }
+    if (!selectedFile) { setError('Please select a video file.'); return; }
     try {
       setIsUploading(true);
-      if (uploadMode === 'embed') {
-        if (!isAdmin) throw new Error('Admin access required for embed uploads.');
-        const source = getEmbedSource(embedUrl); if (!/^https?:\/\//i.test(source)) throw new Error('Please enter a valid HTTP(S) embed URL or iframe code.');
-        const uqloadFileCode = extractUqloadFileCode(source); const isUqload = /uqload\.vc/i.test(source) && Boolean(uqloadFileCode);
-        await videoService.createVideo({ title: title.trim(), description: description.trim(), category_id: categoryId || undefined, creator_id: user.id, video_url: source, thumbnail_url: isUqload ? `/api/uqload/thumbnail/${encodeURIComponent(uqloadFileCode!)}` : '', preview_animation_url: '', provider: isUqload ? 'uqload' : 'embed', provider_id: isUqload ? uqloadFileCode! : undefined, uqload_filecode: isUqload ? uqloadFileCode! : undefined, is_published: true });
-        setSuccess(isUqload ? 'UQLOAD embed added with automatic thumbnail.' : 'Embed video added successfully.');
-      } else if (uploadMode === 'bunny') {
-        if (!selectedFile) throw new Error('Please select a video file.');
-        const upload = await initBunnyVideoUpload(title.trim()); const videoId = upload.videoId; await uploadVideoBinary(upload.proxyUploadUrl, selectedFile); await videoService.createVideo({ title: title.trim(), description: description.trim(), category_id: categoryId || undefined, creator_id: user.id, video_url: getBunnyHlsUrl(upload.libraryId, videoId), thumbnail_url: getBunnyThumbnailUrl(upload.libraryId, videoId), preview_animation_url: getBunnyPreviewUrl(upload.libraryId, videoId), provider: 'bunny', provider_id: videoId, is_published: true }); setSuccess('Bunny Stream upload completed successfully.');
+      const session = await import('../lib/supabase').then(({ supabase }) => supabase.auth.getSession());
+      const token = session.data.session?.access_token;
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      let result: any;
+      let providerId = '';
+      let videoUrl = '';
+      let thumbnailUrl = '';
+
+      if (uploadMode === 'streamtape') {
+        result = await uploadMultipart('/api/streamtape/proxy-upload', token, 'Streamtape');
+        providerId = String(result.fileId || result.providerId || '');
+        if (!providerId) throw new Error('Streamtape did not return a file ID.');
+        videoUrl = String(result.embedUrl || `https://streamtape.com/e/${encodeURIComponent(providerId)}`);
+        thumbnailUrl = String(result.thumbnailUrl || '');
+      } else if (uploadMode === 'filemoon') {
+        result = await uploadMultipart('/api/filemoon/proxy-upload', token, 'FileMoon');
+        providerId = String(result.fileId || result.providerId || '');
+        if (!providerId) throw new Error('FileMoon did not return a file ID.');
+        videoUrl = String(result.embedUrl || result.videoUrl || `https://filemoon.org/${encodeURIComponent(providerId)}/embed`);
+        thumbnailUrl = String(result.thumbnailUrl || '');
+      } else if (uploadMode === 'doodstream') {
+        result = await uploadMultipart('/api/doodstream/proxy-upload', token, 'DoodStream');
+        providerId = String(result.fileCode || result.providerId || '');
+        if (!providerId) throw new Error('DoodStream did not return a file code.');
+        videoUrl = String(result.embedUrl || result.videoUrl || `https://dood.to/e/${encodeURIComponent(providerId)}`);
+        thumbnailUrl = String(result.thumbnailUrl || '');
       } else {
-        if (!isAdmin) throw new Error(`Admin access required for ${uploadMode === 'upload18' ? 'Upload18' : uploadMode === 'doodstream' ? 'DoodStream' : uploadMode === 'filemoon' ? 'FileMoon' : 'UQLOAD'} uploads.`);
-        if (!selectedFile) throw new Error('Please select a video file.');
-        const session = await import('../lib/supabase').then(({ supabase }) => supabase.auth.getSession()); const token = session.data.session?.access_token; if (!token) throw new Error('Your session has expired. Please sign in again.');
-        if (uploadMode === 'filemoon') {
-          const result = await uploadToFileMoon(selectedFile, token);
-          const fileId = result.fileId;
-          const videoUrl = String(result.embedUrl || result.videoUrl || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`);
-          await videoService.createVideo({ title: title.trim(), description: description.trim(), category_id: categoryId || undefined, creator_id: user.id, video_url: videoUrl, thumbnail_url: result.thumbnailUrl || '', preview_animation_url: '', provider: 'filemoon', provider_id: fileId, is_published: true });
-          setSuccess('FileMoon upload completed successfully.');
-        } else if (uploadMode === 'doodstream') {
-          const formData = new FormData();
-          formData.append('file', selectedFile);
-          formData.append('title', title.trim());
-          const response = await new Promise<any>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', '/api/doodstream/proxy-upload');
-            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-            xhr.upload.onprogress = (event) => {
-              if (event.lengthComputable) setSuccess(`Uploading to DoodStream... ${Math.round((event.loaded / event.total) * 100)}%`);
-            };
-            xhr.onload = () => {
-              try {
-                const data = JSON.parse(xhr.responseText || '{}');
-                if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-                else reject(new Error(data?.error || data?.message || `DoodStream upload failed (${xhr.status}).`));
-              } catch { reject(new Error(`DoodStream upload failed (${xhr.status}).`)); }
-            };
-            xhr.onerror = () => reject(new Error('Network error while uploading to DoodStream.'));
-            xhr.send(formData);
-          });
-          const fileCode = String(response.fileCode || response.providerId || '');
-          if (!fileCode) throw new Error('DoodStream did not return a file code.');
-          const videoUrl = String(response.embedUrl || response.videoUrl || `https://dood.to/e/${encodeURIComponent(fileCode)}`);
-          await videoService.createVideo({ title: title.trim(), description: description.trim(), category_id: categoryId || undefined, creator_id: user.id, video_url: videoUrl, thumbnail_url: response.thumbnailUrl || '', preview_animation_url: '', provider: 'doodstream', provider_id: fileCode, is_published: true });
-          setSuccess('DoodStream upload completed successfully.');
-        } else if (uploadMode === 'upload18') {
-          const result = await uploadToUpload18(selectedFile, token);
-          const vid = String(result.vid || result.videoId); const videoUrl = String(result.embedUrl || result.videoUrl || `https://upload18.net/play/${encodeURIComponent(vid)}`);
-          await videoService.createVideo({ title: title.trim(), description: description.trim(), category_id: categoryId || undefined, creator_id: user.id, video_url: videoUrl, thumbnail_url: result.thumbnailUrl || '', preview_animation_url: '', provider: 'upload18', provider_id: vid, is_published: true });
-          setSuccess('Upload18 upload completed successfully.');
-        } else {
-          const formData = new FormData(); formData.append('file', selectedFile); formData.append('title', title.trim());
-          const response = await new Promise<any>((resolve, reject) => { const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/uqload/proxy-upload'); xhr.setRequestHeader('Authorization', `Bearer ${token}`); xhr.onload = () => { try { const data = JSON.parse(xhr.responseText || '{}'); if (xhr.status >= 200 && xhr.status < 300) resolve(data); else reject(new Error(data?.error || data?.message || `UQLOAD upload failed (${xhr.status}).`)); } catch { reject(new Error(`UQLOAD upload failed (${xhr.status}).`)); } }; xhr.onerror = () => reject(new Error('Network error while uploading to UQLOAD.')); xhr.send(formData); });
-          const { fileCode, thumbnailUrl } = extractUqloadFile(response); if (!fileCode) throw new Error('UQLOAD did not return a file code.'); await videoService.createVideo({ title: title.trim(), description: description.trim(), category_id: categoryId || undefined, creator_id: user.id, video_url: `https://uqload.vc/e/${fileCode}`, thumbnail_url: thumbnailUrl || `/api/uqload/thumbnail/${encodeURIComponent(fileCode)}`, preview_animation_url: '', provider: 'uqload', provider_id: fileCode, is_published: true }); setSuccess('UQLOAD upload completed successfully.');
-        }
+        result = await uploadMultipart('/api/uqload/proxy-upload', token, 'UQLOAD');
+        const extracted = extractUqloadFile(result);
+        providerId = String(extracted.fileCode || '');
+        if (!providerId) throw new Error('UQLOAD did not return a file code.');
+        videoUrl = `https://uqload.vc/e/${providerId}`;
+        thumbnailUrl = extracted.thumbnailUrl || `/api/uqload/thumbnail/${encodeURIComponent(providerId)}`;
       }
-      setTitle(''); setDescription(''); setCategoryId(''); setSelectedFile(null); setEmbedUrl('');
-    } catch (err) { setError(err instanceof Error ? err.message : 'Upload failed.'); } finally { setIsUploading(false); }
+
+      const created = await videoService.createVideo({
+        title: title.trim(),
+        description: description.trim(),
+        category_id: categoryId || undefined,
+        creator_id: user.id,
+        video_url: videoUrl,
+        thumbnail_url: thumbnailUrl,
+        preview_animation_url: '',
+        provider: uploadMode,
+        provider_id: providerId,
+        ...(uploadMode === 'uqload' ? { uqload_filecode: providerId } : {}),
+        is_published: true,
+      });
+
+      const localEmbed = `${window.location.origin}/embed/${created.id}`;
+      setEmbedLink(localEmbed);
+      setSuccess(`${uploadMode === 'streamtape' ? 'Streamtape' : uploadMode === 'filemoon' ? 'FileMoon' : uploadMode === 'doodstream' ? 'DoodStream' : 'UQLOAD'} upload completed successfully.`);
+      setTitle(''); setDescription(''); setCategoryId(''); setSelectedFile(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed.');
+    } finally { setIsUploading(false); }
   };
+
   return (
-    <div className="min-h-screen bg-black text-white p-6 md:p-10"><div className="max-w-3xl mx-auto space-y-6">
-      <div><h1 className="text-3xl font-black">Upload Video</h1><p className="text-sm text-zinc-400 mt-1">Sign in is required for all video uploads. UQLOAD, Upload18, DoodStream, FileMoon, and Embed are admin-only.</p></div>
-      <div className="flex flex-wrap bg-[#0a0a0a] border border-white/10 rounded-xl p-1">{(['bunny', 'uqload', 'upload18', 'doodstream', 'filemoon', 'embed'] as UploadMode[]).map((mode) => <button key={mode} type="button" onClick={() => setUploadMode(mode)} className={`flex-1 min-w-[120px] py-2 text-sm font-semibold rounded-lg transition-colors ${uploadMode === mode ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-400 hover:text-white'}`}>{mode === 'bunny' ? 'Bunny Stream' : mode === 'uqload' ? 'UQLOAD Stream' : mode === 'upload18' ? 'Upload18' : mode === 'doodstream' ? 'DoodStream' : mode === 'filemoon' ? 'FileMoon' : 'Any Embed Link'}</button>)}</div>
-      <form onSubmit={handleSubmit} className="space-y-6"><div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4">
-        <div><label className="block text-sm font-bold text-white mb-2">Title</label><input value={title} onChange={(event) => setTitle(event.target.value)} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50" placeholder="Video title" /></div>
-        <div><label className="block text-sm font-bold text-white mb-2">Description</label><textarea value={description} onChange={(event) => setDescription(event.target.value)} className="w-full h-24 px-4 py-3 rounded-xl bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50" placeholder="Optional description" /></div>
-        <div><label className="block text-sm font-bold text-white mb-2">Category</label><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"><option value="">No category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div>
+    <div className="min-h-screen bg-black text-white p-6 md:p-10">
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div><h1 className="text-3xl font-black">Upload Video</h1><p className="text-sm text-zinc-400 mt-1">Admin-only video upload providers.</p></div>
+        <div className="flex flex-wrap bg-[#0a0a0a] border border-white/10 rounded-xl p-1">
+          {(['uqload', 'doodstream', 'filemoon', 'streamtape'] as UploadMode[]).map((mode) => <button key={mode} type="button" onClick={() => { setUploadMode(mode); setError(''); setSuccess(''); setEmbedLink(''); }} className={`flex-1 min-w-[130px] py-2 text-sm font-semibold rounded-lg transition-colors ${uploadMode === mode ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-400 hover:text-white'}`}>{mode === 'uqload' ? 'UQLOAD' : mode === 'doodstream' ? 'DoodStream' : mode === 'filemoon' ? 'FileMoon' : 'Streamtape'}</button>)}
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4">
+            <div><label className="block text-sm font-bold text-white mb-2">Title</label><input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50" placeholder="Video title" /></div>
+            <div><label className="block text-sm font-bold text-white mb-2">Description</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} className="w-full h-24 px-4 py-3 rounded-xl bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50" placeholder="Optional description" /></div>
+            <div><label className="block text-sm font-bold text-white mb-2">Category</label><select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"><option value="">No category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div>
+          </div>
+          {!selectedFile ? <div onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} className={`border border-dashed rounded-3xl p-10 text-center cursor-pointer transition-all ${isDragging ? 'border-amber-400 bg-amber-500/10' : 'border-white/10 hover:border-white/20 bg-[#0a0a0a]'}`}><input ref={fileInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={(e) => handleFileSelect(e.target.files?.[0])} className="hidden" /><div className="w-16 h-16 rounded-2xl bg-[#141414] border border-white/10 text-amber-400 flex items-center justify-center mx-auto mb-4"><Upload className="w-8 h-8" /></div><h3 className="font-bold text-base text-white">Select or drag a video file here</h3><p className="text-xs text-zinc-400 mt-1">MP4, WebM, MOV, or MKV up to 1GB</p><div className="mt-4 inline-flex items-center px-3 py-1 rounded-full bg-[#161616] border border-white/10 text-[11px] text-zinc-300">{uploadMode === 'streamtape' ? 'Streamtape API • Admin only' : `${uploadMode === 'filemoon' ? 'FileMoon' : uploadMode === 'doodstream' ? 'DoodStream' : 'UQLOAD'} API • Admin only`}</div></div> : <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 flex items-center justify-between gap-4"><div className="min-w-0"><p className="font-semibold truncate">{selectedFile.name}</p><p className="text-xs text-zinc-500">{(selectedFile.size / 1024 / 1024).toFixed(1)} MB</p></div><button type="button" onClick={() => setSelectedFile(null)} className="p-2 rounded-lg hover:bg-white/10" aria-label="Remove file"><X className="w-5 h-5" /></button></div>}
+          {error && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-300 break-words">{error}</div>}
+          {success && <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300">{success}</div>}
+          {embedLink && <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20"><p className="text-xs text-amber-300 mb-2">Unique CornMM Embed Link</p><div className="flex gap-2"><input readOnly value={embedLink} className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-black border border-white/10 text-xs text-white" /><button type="button" onClick={() => navigator.clipboard?.writeText(embedLink)} className="px-3 py-2 rounded-lg bg-amber-500 text-black text-xs font-bold">Copy</button></div></div>}
+          <button type="submit" disabled={isUploading} className="w-full py-4 rounded-2xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">{isUploading ? <><Loader2 className="w-5 h-5 animate-spin" /> Uploading...</> : <><LinkIcon className="w-5 h-5" /> Upload {uploadMode === 'streamtape' ? 'to Streamtape' : uploadMode === 'filemoon' ? 'to FileMoon' : uploadMode === 'doodstream' ? 'to DoodStream' : 'to UQLOAD'}</>}</button>
+        </form>
       </div>
-      {uploadMode === 'embed' ? <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4"><label className="block text-sm font-bold text-white">Embed Code or URL</label><textarea value={embedUrl} onChange={(event) => setEmbedUrl(event.target.value)} placeholder={'<iframe src="https://example.com/embed/...">...</iframe>'} className="w-full h-32 px-4 py-3 rounded-xl bg-black border border-white/10 text-white placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-amber-500/50" /></div> : (!selectedFile ? <div onDragOver={(event) => { event.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} className={`border border-dashed rounded-3xl p-10 text-center cursor-pointer transition-all ${isDragging ? 'border-amber-400 bg-amber-500/10' : 'border-white/10 hover:border-white/20 bg-[#0a0a0a]'}`}><input ref={fileInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={(event) => handleFileSelect(event.target.files?.[0])} className="hidden" /><div className="w-16 h-16 rounded-2xl bg-[#141414] border border-white/10 text-amber-400 flex items-center justify-center mx-auto mb-4"><Upload className="w-8 h-8" /></div><h3 className="font-bold text-base text-white">Select or drag a video file here</h3><p className="text-xs text-zinc-400 mt-1">MP4, WebM, MOV, or MKV up to 1GB</p>{uploadMode === 'bunny' && <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#161616] border border-white/10 text-[11px] text-zinc-300"><Sparkles className="w-3.5 h-3.5 text-amber-400" /> HLS transcoding via Bunny Stream</div>}{uploadMode === 'doodstream' && <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#161616] border border-white/10 text-[11px] text-zinc-300">DoodStream API • Admin only</div>}{uploadMode === 'upload18' && <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#161616] border border-white/10 text-[11px] text-zinc-300">Upload18 API • Admin only</div>}{uploadMode === 'filemoon' && <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#161616] border border-white/10 text-[11px] text-zinc-300">FileMoon API • Admin only</div>}</div> : <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 flex items-center justify-between gap-4"><div className="min-w-0"><p className="font-semibold truncate">{selectedFile.name}</p><p className="text-xs text-zinc-500">{(selectedFile.size / 1024 / 1024).toFixed(1)} MB</p></div><button type="button" onClick={() => setSelectedFile(null)} className="p-2 rounded-lg hover:bg-white/10" aria-label="Remove file"><X className="w-5 h-5" /></button></div>)}
-      {error && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-300 break-words">{error}</div>}{success && <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300">{success}</div>}
-      <button type="submit" disabled={isUploading} className="w-full py-4 rounded-2xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">{isUploading ? <><Loader2 className="w-5 h-5 animate-spin" /> Uploading...</> : <><LinkIcon className="w-5 h-5" /> {uploadMode === 'embed' ? 'Add Embed Video' : 'Upload Video'}</>}</button>
-      </form>
-    </div></div>
+    </div>
   );
 }
