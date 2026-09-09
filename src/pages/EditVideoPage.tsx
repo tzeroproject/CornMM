@@ -98,6 +98,7 @@ export const EditVideoPage: React.FC = () => {
 
   if (isLoading || !video) return <div className="py-20 text-center"><div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" /></div>;
   const isFileMoon = String((video as any).provider || '').toLowerCase() === 'filemoon';
+  const hasFileMoonSource = isFileMoon || String((video as any).video_url || '').toLowerCase().includes('filemoon');
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -110,7 +111,7 @@ export const EditVideoPage: React.FC = () => {
         <div className="p-5 rounded-2xl bg-[#0a0a0a] border border-white/10 space-y-4">
           <div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Thumbnail</label><p className="text-[11px] text-zinc-500">Generate a thumbnail from the FileMoon video or upload your own. JPG, PNG, or WebP up to 10MB.</p></div>
           <div className="flex flex-col sm:flex-row gap-4 items-start"><div className="w-full sm:w-48 aspect-video rounded-xl overflow-hidden bg-black border border-white/10 flex items-center justify-center">{(thumbnailPreview || video.thumbnail_url) ? <img src={thumbnailPreview || video.thumbnail_url} alt="Current thumbnail" className="w-full h-full object-cover" /> : <div className="text-zinc-600 flex flex-col items-center gap-2"><ImagePlus className="w-7 h-7" /><span className="text-[10px]">No thumbnail</span></div>}</div><div className="flex-1 space-y-2">
-            {isFileMoon && <button type="button" onClick={handleGenerateFileMoonThumbnail} disabled={isUploadingThumbnail} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold disabled:opacity-50">{isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}{isUploadingThumbnail ? 'Generating...' : 'Generate from FileMoon Video'}</button>}
+            {hasFileMoonSource && <button type="button" onClick={handleGenerateFileMoonThumbnail} disabled={isUploadingThumbnail} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold disabled:opacity-50">{isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}{isUploadingThumbnail ? 'Generating...' : 'Generate from FileMoon Video'}</button>}
             <input id="video-thumbnail" type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(ev) => { const file = ev.target.files?.[0] || null; setThumbnailFile(file); if (file) setThumbnailPreview(URL.createObjectURL(file)); }} />
             <label htmlFor="video-thumbnail" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white hover:bg-white/10 cursor-pointer"><ImagePlus className="w-4 h-4" /> Choose Thumbnail</label>
             {thumbnailFile && <p className="text-[11px] text-zinc-400 truncate">{thumbnailFile.name}</p>}
