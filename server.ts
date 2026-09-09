@@ -45,6 +45,40 @@ app.get("/api/videos", async (req, res) => { if (!supabaseAdmin) return res.stat
 app.get("/api/videos/:id", async (req, res, next) => { if (req.params.id === "view") return next(); if (!supabaseAdmin) return res.status(500).json({ error: "Supabase server configuration missing" }); try { const id = String(req.params.id); const q = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) ? supabaseAdmin.from("videos").select(VIDEO_SELECT).or(`id.eq.${id},slug.eq.${id}`).maybeSingle() : supabaseAdmin.from("videos").select(VIDEO_SELECT).eq("slug", id).maybeSingle(); const { data, error } = await q; if (error) return res.status(400).json({ error: error.message, code: error.code }); if (!data) return res.status(404).json({ error: "Video not found" }); res.json({ video: data }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to load video" }); } });
 app.post("/api/videos", async (req, res) => { if (!supabaseAdmin) return res.status(500).json({ error: "Supabase server configuration missing" }); const user = await optionalUser(req); try { const v = req.body || {}; const slug = String(v.slug || `${String(v.title || "untitled").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}-${Math.random().toString(36).slice(2, 7)}`); const row: any = { ...v, slug, id: v.id || undefined }; row.creator_id = user?.id || null; delete row.category; delete row.creator; const { data, error } = await supabaseAdmin.from("videos").insert(row).select(VIDEO_SELECT).single(); if (error) return res.status(400).json({ error: error.message, code: error.code }); res.status(201).json({ video: data }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to create video" }); } });
 app.patch("/api/videos/:id", async (req, res, next) => { if (req.params.id === "view") return next(); const user = await requireUser(req, res); if (!user || !supabaseAdmin) return; try { const updates = { ...(req.body || {}), updated_at: new Date().toISOString() }; delete (updates as any).id; delete (updates as any).category; delete (updates as any).creator; const { data, error } = await supabaseAdmin.from("videos").update(updates).eq("id", req.params.id).select(VIDEO_SELECT).single(); if (error) return res.status(400).json({ error: error.message, code: error.code }); res.json({ video: data }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to update video" }); } });
+app.post("/api/videos/:id/thumbnail", upload.single("thumbnail"), async (req, res) => {
+  const adminId = await requireAdmin(req, res);
+  if (!adminId || !supabaseAdmin) return;
+  let tempPath = "";
+  try {
+    if (!req.file) return res.status(400).json({ error: "No thumbnail image uploaded" });
+    const allowed = new Set(["image/jpeg", "image/png", "image/webp"]);
+    if (!allowed.has(String(req.file.mimetype || "").toLowerCase())) return res.status(422).json({ error: "Thumbnail must be JPG, PNG, or WebP" });
+    if (Number(req.file.size || 0) > 10 * 1024 * 1024) return res.status(422).json({ error: "Thumbnail must be 10MB or smaller" });
+    tempPath = req.file.path;
+    const bucket = "thumbnails";
+    const bucketCheck = await supabaseAdmin.storage.getBucket(bucket);
+    if (bucketCheck.error) {
+      const created = await supabaseAdmin.storage.createBucket(bucket, { public: true, fileSizeLimit: "10MB", allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"] });
+      if (created.error && !String(created.error.message || "").toLowerCase().includes("already exists")) throw created.error;
+    }
+    const ext = String(req.file.originalname || "").toLowerCase().match(/\.(jpe?g|png|webp)$/)?.[1] || (req.file.mimetype === "image/png" ? "png" : req.file.mimetype === "image/webp" ? "webp" : "jpg");
+    const objectPath = `${req.params.id}/thumbnail-${Date.now()}.${ext}`;
+    const buffer = fs.readFileSync(tempPath);
+    const { error: uploadError } = await supabaseAdmin.storage.from(bucket).upload(objectPath, buffer, { contentType: req.file.mimetype, upsert: true, cacheControl: "31536000" });
+    if (uploadError) throw uploadError;
+    const { data: publicData } = supabaseAdmin.storage.from(bucket).getPublicUrl(objectPath);
+    const thumbnailUrl = publicData.publicUrl;
+    const { data: video, error: updateError } = await supabaseAdmin.from("videos").update({ thumbnail_url: thumbnailUrl, updated_at: new Date().toISOString() }).eq("id", req.params.id).select(VIDEO_SELECT).single();
+    if (updateError) return res.status(400).json({ error: updateError.message, code: updateError.code });
+    res.json({ success: true, thumbnailUrl, video });
+  } catch (err: any) {
+    console.error("[Thumbnail] upload failed:", err);
+    res.status(500).json({ error: err?.message || "Thumbnail upload failed" });
+  } finally {
+    if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} }
+  }
+});
+
 app.delete("/api/videos/:id", async (req, res, next) => { if (req.params.id === "view") return next(); const user = await requireUser(req, res); if (!user || !supabaseAdmin) return; try { const { error } = await supabaseAdmin.from("videos").delete().eq("id", req.params.id); if (error) return res.status(400).json({ error: error.message, code: error.code }); res.json({ success: true }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to delete video" }); } });
 app.get("/api/categories", async (_req, res) => { if (!supabaseAdmin) return res.status(500).json({ error: "Supabase server configuration missing" }); try { const { data, error } = await supabaseAdmin.from("categories").select("*").order("name"); if (error) return res.status(400).json({ error: error.message }); res.json({ categories: data || [] }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to load categories" }); } });
 app.get("/api/tags", async (_req, res) => { if (!supabaseAdmin) return res.status(500).json({ error: "Supabase server configuration missing" }); try { const { data, error } = await supabaseAdmin.from("tags").select("*").order("name"); if (error) return res.status(400).json({ error: error.message }); res.json({ tags: data || [] }); } catch (e: any) { res.status(500).json({ error: e?.message || "Failed to load tags" }); } });
