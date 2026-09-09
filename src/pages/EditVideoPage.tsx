@@ -16,7 +16,6 @@ export const EditVideoPage: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Form Fields
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -31,24 +30,17 @@ export const EditVideoPage: React.FC = () => {
     async function load() {
       if (!id) return;
       setIsLoading(true);
-      const [v, cats] = await Promise.all([
-        videoService.getVideoById(id),
-        videoService.getCategories(),
-      ]);
-
+      const [v, cats] = await Promise.all([videoService.getVideoById(id), videoService.getCategories()]);
       if (!v) {
         showToast({ type: 'error', title: 'Video not found' });
         navigate('/dashboard');
         return;
       }
-
-      // Check authorization
       if (user && v.creator_id !== user.id && !isAdmin) {
         showToast({ type: 'error', title: 'Unauthorized', message: 'You cannot edit another creator\'s video.' });
         navigate('/dashboard');
         return;
       }
-
       setVideo(v);
       setCategories(cats);
       setTitle(v.title);
@@ -89,10 +81,63 @@ export const EditVideoPage: React.FC = () => {
     }
   };
 
+  const handleGenerateFileMoonThumbnail = async () => {
+    if (!video || String((video as any).provider || '').toLowerCase() !== 'filemoon') return;
+    const providerId = String((video as any).provider_id || '').trim();
+    if (!providerId) {
+      showToast({ type: 'error', title: 'Thumbnail Generation Failed', message: 'FileMoon provider ID is missing.' });
+      return;
+    }
+    setIsUploadingThumbnail(true);
+    try {
+      const { supabase } = await import('../lib/supabase');
+      const { data: session } = await supabase.auth.getSession();
+      const token = session.session?.access_token;
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const candidates = [
+        `https://thumbs.filemoon.sx/${encodeURIComponent(providerId)}.jpg`,
+        `https://thumbs.filemoon.sx/${encodeURIComponent(providerId)}_t.jpg`,
+      ];
+      let imageBlob: Blob | null = null;
+      for (const url of candidates) {
+        try {
+          const response = await fetch(url, { mode: 'cors', cache: 'no-store' });
+          if (!response.ok) continue;
+          const type = String(response.headers.get('content-type') || '').toLowerCase();
+          if (!type.startsWith('image/')) continue;
+          const blob = await response.blob();
+          if (blob.size > 0 && blob.size <= 10 * 1024 * 1024) {
+            imageBlob = blob;
+            break;
+          }
+        } catch {}
+      }
+      if (!imageBlob) throw new Error('FileMoon thumbnail is not available yet. Wait for FileMoon processing and try again.');
+
+      const file = new File([imageBlob], `filemoon-${providerId}.jpg`, { type: imageBlob.type || 'image/jpeg' });
+      const formData = new FormData();
+      formData.append('thumbnail', file);
+      const uploadResponse = await fetch('/api/videos/' + encodeURIComponent(video.id) + '/thumbnail', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+        body: formData,
+      });
+      const data = await uploadResponse.json().catch(() => ({}));
+      if (!uploadResponse.ok) throw new Error(data.error || 'Generated thumbnail upload failed.');
+      setVideo(data.video || { ...video, thumbnail_url: data.thumbnailUrl });
+      setThumbnailPreview(data.thumbnailUrl || '');
+      showToast({ type: 'success', title: 'Thumbnail Generated' });
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Thumbnail Generation Failed', message: err.message });
+    } finally {
+      setIsUploadingThumbnail(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!video) return;
-
     setIsSaving(true);
     try {
       await videoService.updateVideo(video.id, {
@@ -102,7 +147,6 @@ export const EditVideoPage: React.FC = () => {
         visibility,
         is_age_restricted: isAgeRestricted,
       });
-
       showToast({ type: 'success', title: 'Changes Saved' });
       navigate('/dashboard');
     } catch (err: any) {
@@ -115,7 +159,6 @@ export const EditVideoPage: React.FC = () => {
   const handleDelete = async () => {
     if (!video) return;
     if (!window.confirm(`Permanently delete "${video.title}"?`)) return;
-
     try {
       await videoService.deleteVideo(video.id);
       showToast({ type: 'success', title: 'Video Deleted' });
@@ -126,142 +169,43 @@ export const EditVideoPage: React.FC = () => {
   };
 
   if (isLoading || !video) {
-    return (
-      <div className="py-20 text-center">
-        <div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" />
-      </div>
-    );
+    return <div className="py-20 text-center"><div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" /></div>;
   }
+
+  const isFileMoon = String((video as any).provider || '').toLowerCase() === 'filemoon';
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <button
-        onClick={() => navigate('/dashboard')}
-        className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
-      >
-        <ArrowLeft className="w-4 h-4" /> Back to Studio
-      </button>
-
+      <button onClick={() => navigate('/dashboard')} className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"><ArrowLeft className="w-4 h-4" /> Back to Studio</button>
       <div className="pb-4 border-b border-white/10 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white flex items-center gap-2 font-editorial italic">
-          <Edit3 className="w-5 h-5 text-amber-400" />
-          Edit Stream Details
-        </h1>
-
-        <button
-          onClick={handleDelete}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-950/40 border border-rose-900/40 transition-colors cursor-pointer"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          Delete
-        </button>
+        <h1 className="text-xl font-bold text-white flex items-center gap-2 font-editorial italic"><Edit3 className="w-5 h-5 text-amber-400" /> Edit Stream Details</h1>
+        <button onClick={handleDelete} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-950/40 border border-rose-900/40 transition-colors cursor-pointer"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
       </div>
 
       <form onSubmit={handleSave} className="space-y-5">
-        <div>
-          <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Title</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full h-10 px-3.5 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Description</label>
-          <textarea
-            rows={5}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full p-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-          />
-        </div>
-
+        <div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Title</label><input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="w-full h-10 px-3.5 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400" required /></div>
+        <div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Description</label><textarea rows={5} value={description} onChange={(e) => setDescription(e.target.value)} className="w-full p-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400" /></div>
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Category</label>
-            <select
-              value={categoryId || ''}
-              onChange={(e) => setCategoryId(e.target.value)}
-              className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-            >
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Visibility</label>
-            <select
-              value={visibility || 'public'}
-              onChange={(e) => setVisibility(e.target.value as any)}
-              className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
-            >
-              <option value="public">Public</option>
-              <option value="unlisted">Unlisted</option>
-              <option value="private">Private</option>
-            </select>
-          </div>
+          <div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Category</label><select value={categoryId || ''} onChange={(e) => setCategoryId(e.target.value)} className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400">{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+          <div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Visibility</label><select value={visibility || 'public'} onChange={(e) => setVisibility(e.target.value as any)} className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></div>
         </div>
-
 
         <div className="p-5 rounded-2xl bg-[#0a0a0a] border border-white/10 space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Thumbnail</label>
-            <p className="text-[11px] text-zinc-500">Upload a thumbnail separately. JPG, PNG, or WebP up to 10MB.</p>
-          </div>
+          <div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Thumbnail</label><p className="text-[11px] text-zinc-500">Generate a thumbnail from the FileMoon video or upload your own. JPG, PNG, or WebP up to 10MB.</p></div>
           <div className="flex flex-col sm:flex-row gap-4 items-start">
-            <div className="w-full sm:w-48 aspect-video rounded-xl overflow-hidden bg-black border border-white/10 flex items-center justify-center">
-              {(thumbnailPreview || video.thumbnail_url) ? <img src={thumbnailPreview || video.thumbnail_url} alt="Current thumbnail" className="w-full h-full object-cover" /> : <div className="text-zinc-600 flex flex-col items-center gap-2"><ImagePlus className="w-7 h-7" /><span className="text-[10px]">No thumbnail</span></div>}
-            </div>
+            <div className="w-full sm:w-48 aspect-video rounded-xl overflow-hidden bg-black border border-white/10 flex items-center justify-center">{(thumbnailPreview || video.thumbnail_url) ? <img src={thumbnailPreview || video.thumbnail_url} alt="Current thumbnail" className="w-full h-full object-cover" /> : <div className="text-zinc-600 flex flex-col items-center gap-2"><ImagePlus className="w-7 h-7" /><span className="text-[10px]">No thumbnail</span></div>}</div>
             <div className="flex-1 space-y-2">
+              {isFileMoon && <button type="button" onClick={handleGenerateFileMoonThumbnail} disabled={isUploadingThumbnail} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold disabled:opacity-50">{isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}{isUploadingThumbnail ? 'Generating...' : 'Generate from FileMoon Video'}</button>}
               <input id="video-thumbnail" type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(ev) => { const file = ev.target.files?.[0] || null; setThumbnailFile(file); if (file) setThumbnailPreview(URL.createObjectURL(file)); }} />
-              <label htmlFor="video-thumbnail" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white hover:bg-white/10 cursor-pointer">
-                <ImagePlus className="w-4 h-4" /> Choose Thumbnail
-              </label>
+              <label htmlFor="video-thumbnail" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white hover:bg-white/10 cursor-pointer"><ImagePlus className="w-4 h-4" /> Choose Thumbnail</label>
               {thumbnailFile && <p className="text-[11px] text-zinc-400 truncate">{thumbnailFile.name}</p>}
-              <button type="button" onClick={handleThumbnailUpload} disabled={!thumbnailFile || isUploadingThumbnail} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 text-black text-xs font-bold disabled:opacity-50">
-                {isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {isUploadingThumbnail ? 'Uploading Thumbnail...' : 'Upload Thumbnail'}
-              </button>
+              <button type="button" onClick={handleThumbnailUpload} disabled={!thumbnailFile || isUploadingThumbnail} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 text-black text-xs font-bold disabled:opacity-50">{isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}{isUploadingThumbnail ? 'Uploading Thumbnail...' : 'Upload Thumbnail'}</button>
             </div>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-white/10">
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isAgeRestricted}
-              onChange={(e) => setIsAgeRestricted(e.target.checked)}
-              className="w-4 h-4 rounded text-amber-500 accent-amber-500 bg-[#050505] border-white/10"
-            />
-            <span className="text-xs text-zinc-300">
-              Age Restricted (18+). Requires viewer age consent.
-            </span>
-          </label>
-        </div>
-
-        <div className="flex justify-end gap-3 pt-4 border-t border-white/10">
-          <button
-            type="button"
-            onClick={() => navigate('/dashboard')}
-            className="px-4 py-2 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSaving}
-            className="flex items-center gap-2 px-6 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold uppercase tracking-wider shadow-lg shadow-amber-500/20 disabled:opacity-50 transition-all cursor-pointer"
-          >
-            <Save className="w-3.5 h-3.5" />
-            {isSaving ? 'Saving Changes...' : 'Save Changes'}
-          </button>
-        </div>
+        <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-white/10"><label className="flex items-center gap-3 cursor-pointer"><input type="checkbox" checked={isAgeRestricted} onChange={(e) => setIsAgeRestricted(e.target.checked)} className="w-4 h-4 rounded text-amber-500 accent-amber-500 bg-[#050505] border-white/10" /><span className="text-xs text-zinc-300">Age Restricted (18+). Requires viewer age consent.</span></label></div>
+        <div className="flex justify-end gap-3 pt-4 border-t border-white/10"><button type="button" onClick={() => navigate('/dashboard')} className="px-4 py-2 text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer">Cancel</button><button type="submit" disabled={isSaving} className="flex items-center gap-2 px-6 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black text-xs font-semibold uppercase tracking-wider shadow-lg shadow-amber-500/20 disabled:opacity-50 transition-all cursor-pointer"><Save className="w-3.5 h-3.5" />{isSaving ? 'Saving Changes...' : 'Save Changes'}</button></div>
       </form>
     </div>
   );
