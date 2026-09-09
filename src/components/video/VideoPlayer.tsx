@@ -28,7 +28,6 @@ export const VideoPlayer:React.FC<VideoPlayerProps>=({video,onProgress,onComplet
     hls.loadSource(url);hls.attachMedia(el);hls.on(Hls.Events.ERROR,(_e,d)=>{if(d.fatal)fallback()})
    }else if(el.canPlayType('application/vnd.apple.mpegurl'))el.src=url;else fallback()
   }else el.src=url;
-  // Never make the main player muted by default.
   el.defaultMuted=false;
   el.muted=false;
   el.volume=.9;
@@ -40,7 +39,6 @@ export const VideoPlayer:React.FC<VideoPlayerProps>=({video,onProgress,onComplet
  const togglePlay=()=>{
   const el=videoRef.current;if(!el)return;
   if(el.paused){
-   // Play is a direct user action, so keep audio ON unless the user explicitly muted it.
    if(!isMuted){el.muted=false;el.volume=volume>0?volume:.9}
    el.play().then(()=>{setIsPlaying(true);setHasStarted(true)}).catch(()=>{});
   }else{el.pause();setIsPlaying(false)}
@@ -54,11 +52,13 @@ export const VideoPlayer:React.FC<VideoPlayerProps>=({video,onProgress,onComplet
  useEffect(()=>{const f=()=>setIsFullscreen(Boolean(document.fullscreenElement));document.addEventListener('fullscreenchange',f);return()=>document.removeEventListener('fullscreenchange',f)},[]);
  const formatTime=(s:number)=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
- // Use provider embed if the video is an external embed. Direct MP4/WebM/HLS URLs use CornMM's native player.
+ // External providers must always use their own iframe player. In particular,
+ // DoodStream must not fall through to Bunny/native playback just because a
+ // bunny_video_id is present on the same database row.
  const provider=String(video.provider||'').toLowerCase();
  const isUqloadEmbed=!!video.video_url&&(/uqload\.vc\/e\//i.test(video.video_url)||provider==='uqload');
  const isDoodstreamEmbed=provider==='doodstream' || /dood(?:\.to|\.la|\.so)\/e\//i.test(String(video.video_url||''));
- const isExternal=(isUqloadEmbed||isDoodstreamEmbed)&&(!video.bunny_video_id||video.bunny_video_id==='embed');
+ const isExternal=isDoodstreamEmbed || (isUqloadEmbed&&(!video.bunny_video_id||video.bunny_video_id==='embed'));
 
  if(isExternal||useBunnyIframeEmbed){
   let src=isExternal?video.video_url:getBunnyIframeUrl({videoId:video.bunny_video_id!,autoplay:hasStarted});
