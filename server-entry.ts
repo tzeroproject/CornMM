@@ -4,6 +4,7 @@ import FormData from "form-data";
 import fs from "fs";
 import https from "https";
 import dotenv from "dotenv";
+import crypto from "crypto";
 import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
@@ -104,62 +105,104 @@ const originalListen = express.application.listen;
       const fileName = req.file.originalname || "video.mp4";
       const mimeType = req.file.mimetype || "application/octet-stream";
       const fileSize = Number(req.file.size || 0);
+      const CHUNK_SIZE = 90 * 1024 * 1024;
+      const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
+      const uploadId = crypto.randomUUID();
 
-      // FileMoon's documented normal upload endpoint accepts one multipart file.
-      // Do not send Dropzone/chunk fields or split the file into multiple API uploads.
-      const form = new FormData();
-      form.append("file", fs.createReadStream(tempPath), {
-        filename: fileName,
-        contentType: mimeType,
-        knownLength: fileSize || undefined,
-      });
-      form.append("visibility", "1");
+      const sendFileMoonRequest = async (chunkIndex: number): Promise<{ statusCode: number; body: string; retryAfter?: number }> => {
+        const start = chunkIndex * CHUNK_SIZE;
+        const end = Math.min(fileSize, start + CHUNK_SIZE);
+        const chunkLength = Math.max(0, end - start);
+        const form = new FormData();
 
-      const length = await new Promise<number>((resolve, reject) =>
-        form.getLength((err, n) => err ? reject(err) : resolve(n))
-      );
-
-      const upstream = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
-        const request = https.request({
-          protocol: "https:",
-          hostname: "filemoon.org",
-          path: "/api/v1/files/upload",
-          method: "POST",
-          headers: {
-            ...form.getHeaders(),
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json",
-            "Content-Length": String(length),
-          },
-          timeout: 30 * 60 * 1000,
-        }, (response: any) => {
-          let body = "";
-          response.setEncoding("utf8");
-          response.on("data", (part: string) => { body += part; });
-          response.on("end", () => resolve({ statusCode: Number(response.statusCode || 0), body }));
-          response.on("error", reject);
+        form.append("file", fs.createReadStream(tempPath, { start, end: Math.max(start, end - 1) }), {
+          filename: fileName,
+          contentType: mimeType,
+          knownLength: chunkLength,
         });
-        request.on("timeout", () => request.destroy(new Error("FileMoon upload timed out")));
-        request.on("error", reject);
-        form.pipe(request);
-      });
+        form.append("visibility", "1");
+
+        if (totalChunks > 1) {
+          form.append("dzuuid", uploadId);
+          form.append("dzchunkindex", String(chunkIndex));
+          form.append("dztotalchunkcount", String(totalChunks));
+          form.append("dzchunksize", String(CHUNK_SIZE));
+          form.append("dztotalfilesize", String(fileSize));
+          form.append("dzchunkbyteoffset", String(start));
+        }
+
+        const length = await new Promise<number>((resolve, reject) =>
+          form.getLength((err, n) => err ? reject(err) : resolve(n))
+        );
+
+        return new Promise<{ statusCode: number; body: string; retryAfter?: number }>((resolve, reject) => {
+          const request = https.request({
+            protocol: "https:",
+            hostname: "filemoon.org",
+            path: "/api/v1/files/upload",
+            method: "POST",
+            headers: {
+              ...form.getHeaders(),
+              Authorization: `Bearer ${token}`,
+              Accept: "application/json",
+              "Content-Length": String(length),
+            },
+            timeout: 30 * 60 * 1000,
+          }, (response: any) => {
+            let body = "";
+            response.setEncoding("utf8");
+            response.on("data", (part: string) => { body += part; });
+            response.on("end", () => {
+              const retryHeader = response.headers?.["retry-after"];
+              const retryAfter = Number(Array.isArray(retryHeader) ? retryHeader[0] : retryHeader);
+              resolve({ statusCode: Number(response.statusCode || 0), body, retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined });
+            });
+            response.on("error", reject);
+          });
+          request.on("timeout", () => request.destroy(new Error("FileMoon upload timed out")));
+          request.on("error", reject);
+          form.pipe(request);
+        });
+      };
+
+      let finalResponse: { statusCode: number; body: string } | null = null;
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        let upstream = await sendFileMoonRequest(chunkIndex);
+
+        if (upstream.statusCode === 429) {
+          const waitSeconds = Math.min(Math.max(upstream.retryAfter || 5, 1), 120);
+          console.warn(`[FileMoon] rate limited on chunk ${chunkIndex + 1}/${totalChunks}; retrying after ${waitSeconds}s`);
+          await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+          upstream = await sendFileMoonRequest(chunkIndex);
+        }
+
+        console.log(`[FileMoon] upload chunk ${chunkIndex + 1}/${totalChunks} HTTP ${upstream.statusCode}: ${upstream.body.slice(0, 3000)}`);
+
+        let data: any = {};
+        try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; }
+
+        if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+          return res.status(502).json({
+            error: String(data?.error?.message || data?.error || data?.message || "FileMoon upload failed"),
+            upstreamStatus: upstream.statusCode,
+            chunk: chunkIndex,
+            totalChunks,
+            requestId: data?.request_id || null,
+            details: data,
+          });
+        }
+
+        finalResponse = { statusCode: upstream.statusCode, body: upstream.body };
+      }
+
+      if (!finalResponse) return res.status(502).json({ error: "FileMoon upload did not return a response" });
 
       let data: any = {};
-      try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; }
-      console.log(`[FileMoon] upload HTTP ${upstream.statusCode}: ${upstream.body.slice(0, 3000)}`);
-
-      if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
-        return res.status(502).json({
-          error: String(data?.error?.message || data?.error || data?.message || "FileMoon upload failed"),
-          upstreamStatus: upstream.statusCode,
-          requestId: data?.request_id || null,
-          details: data,
-        });
-      }
+      try { data = JSON.parse(finalResponse.body); } catch { data = { raw: finalResponse.body }; }
 
       const file = data?.data || data?.file || data || {};
       const fileId = String(
-        file?.id || file?.file_id || data?.id || data?.file_id || findValue(data, ["id", "file_id"] ) || ""
+        file?.id || file?.file_id || data?.id || data?.file_id || findValue(data, ["id", "file_id"]) || ""
       ).trim();
       if (!fileId) return res.status(502).json({ error: "FileMoon did not return a file ID", details: data });
 
