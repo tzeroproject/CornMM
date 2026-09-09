@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Edit3, ArrowLeft, Trash2, Save } from 'lucide-react';
+import { Edit3, ArrowLeft, Trash2, Save, ImagePlus, Loader2 } from 'lucide-react';
 import { videoService } from '../services/videoService';
 import { Video, Category } from '../types';
 import { useNotification } from '../context/NotificationContext';
@@ -23,6 +23,9 @@ export const EditVideoPage: React.FC = () => {
   const [visibility, setVisibility] = useState<'public' | 'unlisted' | 'private'>('public');
   const [isAgeRestricted, setIsAgeRestricted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
+  const [thumbnailPreview, setThumbnailPreview] = useState('');
+  const [isUploadingThumbnail, setIsUploadingThumbnail] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -57,6 +60,34 @@ export const EditVideoPage: React.FC = () => {
     }
     load();
   }, [id, user, isAdmin, navigate, showToast]);
+
+  const handleThumbnailUpload = async () => {
+    if (!video || !thumbnailFile) return;
+    setIsUploadingThumbnail(true);
+    try {
+      const { supabase } = await import('../lib/supabase');
+      const { data: session } = await supabase.auth.getSession();
+      const token = session.session?.access_token;
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+      const formData = new FormData();
+      formData.append('thumbnail', thumbnailFile);
+      const response = await fetch('/api/videos/' + encodeURIComponent(video.id) + '/thumbnail', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token },
+        body: formData,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Thumbnail upload failed.');
+      setVideo(data.video || { ...video, thumbnail_url: data.thumbnailUrl });
+      setThumbnailFile(null);
+      setThumbnailPreview(data.thumbnailUrl || '');
+      showToast({ type: 'success', title: 'Thumbnail Updated' });
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Thumbnail Upload Failed', message: err.message });
+    } finally {
+      setIsUploadingThumbnail(false);
+    }
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -173,6 +204,30 @@ export const EditVideoPage: React.FC = () => {
               <option value="unlisted">Unlisted</option>
               <option value="private">Private</option>
             </select>
+          </div>
+        </div>
+
+
+        <div className="p-5 rounded-2xl bg-[#0a0a0a] border border-white/10 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Thumbnail</label>
+            <p className="text-[11px] text-zinc-500">Upload a thumbnail separately. JPG, PNG, or WebP up to 10MB.</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4 items-start">
+            <div className="w-full sm:w-48 aspect-video rounded-xl overflow-hidden bg-black border border-white/10 flex items-center justify-center">
+              {(thumbnailPreview || video.thumbnail_url) ? <img src={thumbnailPreview || video.thumbnail_url} alt="Current thumbnail" className="w-full h-full object-cover" /> : <div className="text-zinc-600 flex flex-col items-center gap-2"><ImagePlus className="w-7 h-7" /><span className="text-[10px]">No thumbnail</span></div>}
+            </div>
+            <div className="flex-1 space-y-2">
+              <input id="video-thumbnail" type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(ev) => { const file = ev.target.files?.[0] || null; setThumbnailFile(file); if (file) setThumbnailPreview(URL.createObjectURL(file)); }} />
+              <label htmlFor="video-thumbnail" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white hover:bg-white/10 cursor-pointer">
+                <ImagePlus className="w-4 h-4" /> Choose Thumbnail
+              </label>
+              {thumbnailFile && <p className="text-[11px] text-zinc-400 truncate">{thumbnailFile.name}</p>}
+              <button type="button" onClick={handleThumbnailUpload} disabled={!thumbnailFile || isUploadingThumbnail} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 text-black text-xs font-bold disabled:opacity-50">
+                {isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {isUploadingThumbnail ? 'Uploading Thumbnail...' : 'Upload Thumbnail'}
+              </button>
+            </div>
           </div>
         </div>
 
