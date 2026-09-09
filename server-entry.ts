@@ -3,7 +3,6 @@ import multer from "multer";
 import FormData from "form-data";
 import fs from "fs";
 import https from "https";
-import crypto from "crypto";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 
@@ -41,13 +40,6 @@ function findValue(value: any, keys: string[]): any {
     if (found !== null) return found;
   }
   return null;
-}
-
-function extractStreamtapeId(value: string): string | null {
-  const source = String(value || "").trim();
-  const iframe = source.match(/<iframe[^>]+src=["']([^"']+)["']/i)?.[1] || source;
-  const match = iframe.match(/streamtape\.com\/(?:e|v)\/([^/?#"']+)/i);
-  return match?.[1] || null;
 }
 
 const originalListen = express.application.listen;
@@ -107,45 +99,101 @@ const originalListen = express.application.listen;
       const token = String(process.env.FILEMOON_API_TOKEN || "").trim();
       if (!token) return res.status(500).json({ error: "FileMoon is not configured. Set FILEMOON_API_TOKEN on Railway." });
       if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
+
       tempPath = req.file.path;
-      const fileSize = Number(req.file.size || 0);
       const fileName = req.file.originalname || "video.mp4";
       const mimeType = req.file.mimetype || "application/octet-stream";
-      const CHUNK_SIZE = 90 * 1024 * 1024;
-      const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
-      const uploadId = crypto.randomUUID();
-      let lastData: any = null;
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const start = chunkIndex * CHUNK_SIZE;
-        const end = Math.min(fileSize, start + CHUNK_SIZE);
-        const chunkLength = Math.max(0, end - start);
-        const chunk = await new Promise<Buffer>((resolve, reject) => {
-          const stream = fs.createReadStream(tempPath, { start, end: end - 1 }); const parts: Buffer[] = [];
-          stream.on("data", (part: Buffer | string) => parts.push(Buffer.isBuffer(part) ? part : Buffer.from(part)));
-          stream.on("end", () => resolve(Buffer.concat(parts))); stream.on("error", reject);
+      const fileSize = Number(req.file.size || 0);
+
+      // FileMoon's documented normal upload endpoint accepts one multipart file.
+      // Do not send Dropzone/chunk fields or split the file into multiple API uploads.
+      const form = new FormData();
+      form.append("file", fs.createReadStream(tempPath), {
+        filename: fileName,
+        contentType: mimeType,
+        knownLength: fileSize || undefined,
+      });
+      form.append("visibility", "1");
+
+      const length = await new Promise<number>((resolve, reject) =>
+        form.getLength((err, n) => err ? reject(err) : resolve(n))
+      );
+
+      const upstream = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+        const request = https.request({
+          protocol: "https:",
+          hostname: "filemoon.org",
+          path: "/api/v1/files/upload",
+          method: "POST",
+          headers: {
+            ...form.getHeaders(),
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+            "Content-Length": String(length),
+          },
+          timeout: 30 * 60 * 1000,
+        }, (response: any) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (part: string) => { body += part; });
+          response.on("end", () => resolve({ statusCode: Number(response.statusCode || 0), body }));
+          response.on("error", reject);
         });
-        const form = new FormData();
-        form.append("file", chunk, { filename: fileName, contentType: mimeType, knownLength: chunkLength }); form.append("visibility", "1");
-        if (totalChunks > 1) { form.append("dzuuid", uploadId); form.append("dzchunkindex", String(chunkIndex)); form.append("dztotalchunkcount", String(totalChunks)); form.append("dzchunksize", String(CHUNK_SIZE)); form.append("dztotalfilesize", String(fileSize)); form.append("dzchunkbyteoffset", String(start)); }
-        const length = await new Promise<number>((resolve, reject) => form.getLength((err, n) => err ? reject(err) : resolve(n)));
-        const upstream = await new Promise<{statusCode:number, body:string}>((resolve, reject) => {
-          form.submit({ protocol: "https:", host: "filemoon.org", path: "/api/v1/files/upload", headers: { ...form.getHeaders(), Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Length": String(length) } }, (error: any, response: any) => {
-            if (error) return reject(error); let body = ""; response.setEncoding("utf8"); response.on("data", (part: string) => { body += part; }); response.on("end", () => resolve({ statusCode: Number(response.statusCode || 0), body })); response.on("error", reject);
-          });
+        request.on("timeout", () => request.destroy(new Error("FileMoon upload timed out")));
+        request.on("error", reject);
+        form.pipe(request);
+      });
+
+      let data: any = {};
+      try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; }
+      console.log(`[FileMoon] upload HTTP ${upstream.statusCode}: ${upstream.body.slice(0, 3000)}`);
+
+      if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+        return res.status(502).json({
+          error: String(data?.error?.message || data?.error || data?.message || "FileMoon upload failed"),
+          upstreamStatus: upstream.statusCode,
+          requestId: data?.request_id || null,
+          details: data,
         });
-        let data: any = {}; try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; }
-        if (upstream.statusCode < 200 || upstream.statusCode >= 300) return res.status(502).json({ error: String(data?.error?.message || data?.error || data?.message || "FileMoon upload failed"), upstreamStatus: upstream.statusCode, requestId: data?.request_id || null, details: data });
-        lastData = data;
       }
-      const file = lastData?.data || lastData?.file || {};
-      const fileId = String(file?.id || file?.file_id || "").trim();
-      if (!fileId) return res.status(502).json({ error: "FileMoon did not return a file ID", details: lastData });
-      const embedUrl = String(file?.urls?.embed || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`);
-      const watchUrl = String(file?.urls?.watch || `https://filemoon.org/${encodeURIComponent(fileId)}/watch`);
-      res.json({ success: true, provider: "filemoon", fileId, providerId: fileId, embedUrl, videoUrl: embedUrl || watchUrl, thumbnailUrl: String(file?.thumbnail_url || file?.thumbnail || "") });
-    } catch (e: any) { console.error("[FileMoon] proxy upload failed:", e); res.status(502).json({ error: e?.message || "FileMoon upload failed", details: e?.cause?.message || String(e), cause: e?.cause?.code || null }); }
-    finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
+
+      const file = data?.data || data?.file || data || {};
+      const fileId = String(
+        file?.id || file?.file_id || data?.id || data?.file_id || findValue(data, ["id", "file_id"] ) || ""
+      ).trim();
+      if (!fileId) return res.status(502).json({ error: "FileMoon did not return a file ID", details: data });
+
+      const embedUrl = String(
+        file?.urls?.embed || data?.urls?.embed || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`
+      );
+      const watchUrl = String(
+        file?.urls?.watch || data?.urls?.watch || `https://filemoon.org/${encodeURIComponent(fileId)}/watch`
+      );
+      const thumbnailUrl = String(
+        file?.thumbnail_url || file?.thumbnail || data?.thumbnail_url || data?.thumbnail || ""
+      );
+
+      return res.json({
+        success: true,
+        provider: "filemoon",
+        fileId,
+        providerId: fileId,
+        embedUrl,
+        videoUrl: embedUrl || watchUrl,
+        thumbnailUrl,
+      });
+    } catch (e: any) {
+      console.error("[FileMoon] proxy upload failed:", e);
+      return res.status(502).json({
+        error: e?.message || "FileMoon upload failed",
+        details: e?.cause?.message || String(e),
+        cause: e?.cause?.code || null,
+      });
+    } finally {
+      if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} }
+    }
   });
+
   return originalListen.apply(this, args as any);
 };
 
