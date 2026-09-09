@@ -1,0 +1,196 @@
+name: Add FileMoon upload integration
+
+on:
+  push:
+    paths:
+      - '.github/workflows/filemoon-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Patch FileMoon integration
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = 'main';
+
+            async function getFile(path) {
+              const r = await github.rest.repos.getContent({ owner, repo, path, ref: branch });
+              return { sha: r.data.sha, text: Buffer.from(r.data.content, 'base64').toString('utf8') };
+            }
+            async function putFile(path, text, sha, message) {
+              await github.rest.repos.createOrUpdateFileContents({ owner, repo, path, branch, sha, message, content: Buffer.from(text, 'utf8').toString('base64') });
+            }
+
+            // ---- server.ts ----
+            {
+              const path = 'server.ts';
+              const f = await getFile(path);
+              let s = f.text;
+              if (!s.includes('async function handleFileMoonUpload')) {
+                const marker = 'async function handleUqloadUpload';
+                if (!s.includes(marker)) throw new Error('server.ts marker not found');
+                const fn = String.raw`async function handleFileMoonUpload(req: any, res: any) {
+  const adminId = await requireAdmin(req, res);
+  if (!adminId) return;
+  let tempPath = "";
+  try {
+    const token = String(process.env.FILEMOON_API_TOKEN || "").trim();
+    if (!token) return res.status(500).json({ error: "FileMoon is not configured. Set FILEMOON_API_TOKEN on Railway." });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    tempPath = req.file.path;
+
+    const form = new FormData();
+    form.append("file", fs.createReadStream(tempPath), {
+      filename: req.file.originalname || "video.mp4",
+      contentType: req.file.mimetype || "application/octet-stream",
+      knownLength: Number(req.file.size || 0) || undefined,
+    });
+    form.append("visibility", "1");
+
+    const contentLength = await new Promise<number>((resolve, reject) => form.getLength((err, length) => err ? reject(err) : resolve(length)));
+    const uploadResult: any = await new Promise((resolve, reject) => {
+      form.submit({
+        protocol: "https:",
+        host: "filemoon.org",
+        path: "/api/v1/files/upload",
+        headers: {
+          ...form.getHeaders(),
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Content-Length": String(contentLength),
+        },
+      }, (error: any, response: any) => {
+        if (error) return reject(error);
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => { body += chunk; });
+        response.on("end", () => {
+          let parsed: any = null;
+          try { parsed = JSON.parse(body); } catch {}
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            return reject(new Error(`FileMoon HTTP ${response.statusCode}: ${parsed?.error?.message || parsed?.message || body.slice(0, 3000)}`));
+          }
+          if (!parsed) return reject(new Error(`FileMoon returned invalid JSON: ${body.slice(0, 3000)}`));
+          resolve(parsed);
+        });
+        response.on("error", reject);
+      });
+    });
+
+    const file = uploadResult?.data || uploadResult?.file || {};
+    const fileId = String(file?.id || file?.file_id || "").trim();
+    if (!uploadResult?.success || !fileId) return res.status(502).json({ error: "FileMoon did not return a file ID", details: uploadResult });
+    const embedUrl = String(file?.urls?.embed || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`);
+    const videoUrl = String(file?.urls?.watch || `https://filemoon.org/${encodeURIComponent(fileId)}/watch`);
+    res.json({
+      success: true,
+      provider: "filemoon",
+      fileId,
+      providerId: fileId,
+      embedUrl,
+      videoUrl,
+      thumbnailUrl: String(file?.thumbnail_url || file?.thumbnail || ""),
+      raw: uploadResult,
+    });
+  } catch (e: any) {
+    console.error("[FileMoon] proxy upload failed:", e);
+    res.status(502).json({ error: "FileMoon upload failed", details: e?.message || String(e), cause: e?.cause?.code || e?.cause?.message || null });
+  } finally {
+    if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} }
+  }
+}
+
+`;
+                s = s.replace(marker, fn + marker);
+              }
+              const route = 'app.post("/api/filemoon/proxy-upload", upload.single("file"), handleFileMoonUpload);';
+              if (!s.includes(route)) {
+                const marker = 'app.post("/api/doodstream/proxy-upload", upload.single("file"), handleDoodstreamUpload);';
+                if (!s.includes(marker)) throw new Error('server route marker not found');
+                s = s.replace(marker, route + '\n' + marker);
+              }
+              await putFile(path, s, f.sha, 'Add FileMoon server upload endpoint');
+            }
+
+            // ---- UploadPage.tsx ----
+            {
+              const path = 'src/pages/UploadPage.tsx';
+              const f = await getFile(path);
+              let s = f.text;
+              s = s.replace("type UploadMode = 'bunny' | 'uqload' | 'upload18' | 'doodstream' | 'embed';", "type UploadMode = 'bunny' | 'uqload' | 'upload18' | 'doodstream' | 'filemoon' | 'embed';");
+
+              if (!s.includes('const uploadToFileMoon')) {
+                const marker = '  const handleSubmit = async (event: React.FormEvent) => {';
+                if (!s.includes(marker)) throw new Error('UploadPage handleSubmit marker not found');
+                const helper = String.raw`  const uploadToFileMoon = async (file: File, token: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('title', title.trim());
+    const response = await new Promise<any>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/filemoon/proxy-upload');
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) setSuccess(`Uploading to FileMoon... ${Math.round((event.loaded / event.total) * 100)}%`);
+      };
+      xhr.onload = () => {
+        try {
+          const data = JSON.parse(xhr.responseText || '{}');
+          if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+          else reject(new Error(data?.error || data?.message || `FileMoon upload failed (${xhr.status}).`));
+        } catch { reject(new Error(`FileMoon upload failed (${xhr.status}).`)); }
+      };
+      xhr.onerror = () => reject(new Error('Network error while uploading to FileMoon.'));
+      xhr.send(formData);
+    });
+    const fileId = String(response.fileId || response.providerId || '');
+    if (!fileId) throw new Error('FileMoon did not return a file ID.');
+    return response;
+  };
+`;
+                s = s.replace(marker, helper + marker);
+              }
+
+              s = s.replace("Admin access required for ${uploadMode === 'upload18' ? 'Upload18' : uploadMode === 'doodstream' ? 'DoodStream' : 'UQLOAD'} uploads.", "Admin access required for ${uploadMode === 'upload18' ? 'Upload18' : uploadMode === 'doodstream' ? 'DoodStream' : uploadMode === 'filemoon' ? 'FileMoon' : 'UQLOAD'} uploads.");
+
+              if (!s.includes("uploadMode === 'filemoon'")) {
+                const marker = "        } else if (uploadMode === 'upload18') {";
+                if (!s.includes(marker)) throw new Error('UploadPage upload branch marker not found');
+                const branch = String.raw`        } else if (uploadMode === 'filemoon') {
+          const result = await uploadToFileMoon(selectedFile, token);
+          const fileId = String(result.fileId || result.providerId);
+          const videoUrl = String(result.embedUrl || result.videoUrl || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`);
+          await videoService.createVideo({
+            title: title.trim(),
+            description: description.trim(),
+            category_id: categoryId || undefined,
+            creator_id: user.id,
+            video_url: videoUrl,
+            thumbnail_url: result.thumbnailUrl || '',
+            preview_animation_url: '',
+            provider: 'filemoon',
+            provider_id: fileId,
+            is_published: true
+          });
+          setSuccess('FileMoon upload completed successfully.');
+`;
+                s = s.replace(marker, branch + marker);
+              }
+
+              s = s.replace("{(['bunny', 'uqload', 'upload18', 'doodstream', 'embed'] as UploadMode[])", "{(['bunny', 'uqload', 'upload18', 'doodstream', 'filemoon', 'embed'] as UploadMode[])");
+              s = s.replace(": mode === 'doodstream' ? 'DoodStream' : 'Any Embed Link'", ": mode === 'doodstream' ? 'DoodStream' : mode === 'filemoon' ? 'FileMoon' : 'Any Embed Link'");
+              s = s.replace('UQLOAD, Upload18, and Embed are admin-only.', 'UQLOAD, Upload18, DoodStream, FileMoon, and Embed are admin-only.');
+              await putFile(path, s, f.sha, 'Add FileMoon upload option');
+            }
+
+            // Remove this one-shot workflow. GITHUB_TOKEN-created pushes do not recursively trigger workflows.
+            const wf = await getFile('.github/workflows/filemoon-once.yml');
+            await github.rest.repos.deleteFile({ owner, repo, path: '.github/workflows/filemoon-once.yml', branch, sha: wf.sha, message: 'Remove one-shot FileMoon patch workflow', committer: { name: 'github-actions[bot]', email: '41898282+github-actions[bot]@users.noreply.github.com' }, author: { name: 'github-actions[bot]', email: '41898282+github-actions[bot]@users.noreply.github.com' } });
