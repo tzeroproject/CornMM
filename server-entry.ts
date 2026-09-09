@@ -53,7 +53,6 @@ function extractVideo(payload: any) {
 function postUpload18(form: FormData, callback: (error: any, response?: any, body?: string) => void) {
   form.getLength((lengthError: any, length: number) => {
     if (lengthError) return callback(lengthError);
-
     form.submit({
       protocol: "https:",
       host: "upload18.net",
@@ -85,9 +84,6 @@ const originalListen = express.application.listen;
       if (!key) return res.status(500).json({ error: "Upload18 is not configured. Set UPLOAD18_API_KEY on Railway." });
       if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
       tempPath = req.file.path;
-
-      // Upload18 requires a valid main category (CID). MyCID is intentionally omitted
-      // because it is account-specific. FID is sent only when explicitly configured.
       const cid = String(process.env.UPLOAD18_CID || "15").trim();
       const fid = String(process.env.UPLOAD18_FID || "").trim();
       const form = new FormData();
@@ -98,66 +94,66 @@ const originalListen = express.application.listen;
         contentType: req.file.mimetype || "application/octet-stream",
         knownLength: Number(req.file.size || 0) || undefined,
       });
-
       const { response, body } = await new Promise<{ response: any; body: string }>((resolve, reject) => {
         postUpload18(form, (error, upstreamResponse, upstreamBody) => {
           if (error) return reject(error);
           resolve({ response: upstreamResponse, body: upstreamBody || "" });
         });
       });
-
       let data: any = {};
       try { data = JSON.parse(body); } catch { data = { raw: body }; }
       console.log(`[Upload18] upstream HTTP ${response?.statusCode || "unknown"}: ${body.slice(0, 3000)}`);
-
-      if (!response || response.statusCode < 200 || response.statusCode >= 300) {
-        return res.status(502).json({
-          error: "Upload18 upload failed",
-          upstreamStatus: response?.statusCode || null,
-          details: data,
-        });
-      }
-
+      if (!response || response.statusCode < 200 || response.statusCode >= 300) return res.status(502).json({ error: "Upload18 upload failed", upstreamStatus: response?.statusCode || null, details: data });
       let result = extractVideo(data);
       if (result.vid && (!result.embed || !result.thumbnail)) {
         try {
-          const detailRes = await fetch(`https://upload18.net/api/getvideodetail/${encodeURIComponent(result.vid)}`, {
-            headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-            signal: AbortSignal.timeout(30000),
-          });
-          if (detailRes.ok) {
-            result = {
-              ...result,
-              ...Object.fromEntries(Object.entries(extractVideo(await detailRes.json())).filter(([, v]) => v)),
-            };
-          }
+          const detailRes = await fetch(`https://upload18.net/api/getvideodetail/${encodeURIComponent(result.vid)}`, { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000) });
+          if (detailRes.ok) result = { ...result, ...Object.fromEntries(Object.entries(extractVideo(await detailRes.json())).filter(([, v]) => v)) };
         } catch {}
       }
-
       if (!result.vid) return res.status(502).json({ error: "Upload18 did not return a video ID", details: data });
       const playUrl = result.link || `https://upload18.net/play/${encodeURIComponent(result.vid)}`;
       const embedUrl = result.embed || playUrl;
-      res.json({
-        success: true,
-        provider: "upload18",
-        vid: result.vid,
-        videoId: result.vid,
-        embedUrl,
-        videoUrl: playUrl,
-        thumbnailUrl: result.thumbnail || "",
-        status: data?.status ?? data?.data?.status ?? null,
-        raw: data,
-      });
+      res.json({ success: true, provider: "upload18", vid: result.vid, videoId: result.vid, embedUrl, videoUrl: playUrl, thumbnailUrl: result.thumbnail || "", status: data?.status ?? data?.data?.status ?? null, raw: data });
     } catch (e: any) {
       console.error("[Upload18] proxy upload failed:", e);
-      res.status(502).json({
-        error: "Upload18 upload failed",
-        details: e?.message || String(e),
-        cause: e?.cause?.code || e?.cause?.message || null,
+      res.status(502).json({ error: "Upload18 upload failed", details: e?.message || String(e), cause: e?.cause?.code || e?.cause?.message || null });
+    } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
+  });
+
+  this.post("/api/filemoon/proxy-upload", upload.single("file"), async (req: any, res: any) => {
+    let tempPath = "";
+    try {
+      if (!(await requireAdmin(req, res))) return;
+      const token = String(process.env.FILEMOON_API_TOKEN || "").trim();
+      if (!token) return res.status(500).json({ error: "FileMoon is not configured. Set FILEMOON_API_TOKEN on Railway." });
+      if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
+      tempPath = req.file.path;
+      const form = new FormData();
+      form.append("file", fs.createReadStream(tempPath), { filename: req.file.originalname || "video.mp4", contentType: req.file.mimetype || "application/octet-stream", knownLength: Number(req.file.size || 0) || undefined });
+      form.append("visibility", "1");
+      const length = await new Promise<number>((resolve, reject) => form.getLength((err, n) => err ? reject(err) : resolve(n)));
+      const upstream = await new Promise<{statusCode:number, body:string}>((resolve, reject) => {
+        form.submit({ protocol: "https:", host: "filemoon.org", path: "/api/v1/files/upload", headers: { ...form.getHeaders(), Authorization: "Bearer " + token, Accept: "application/json", "Content-Length": String(length) } }, (error: any, response: any) => {
+          if (error) return reject(error);
+          let body = ""; response.setEncoding("utf8");
+          response.on("data", (chunk: string) => { body += chunk; });
+          response.on("end", () => resolve({ statusCode: Number(response.statusCode || 0), body }));
+          response.on("error", reject);
+        });
       });
-    } finally {
-      if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} }
-    }
+      let data: any = {}; try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; }
+      if (upstream.statusCode < 200 || upstream.statusCode >= 300) return res.status(502).json({ error: "FileMoon upload failed", upstreamStatus: upstream.statusCode, details: data });
+      const file = data?.data || data?.file || {};
+      const fileId = String(file?.id || file?.file_id || "").trim();
+      if (!fileId) return res.status(502).json({ error: "FileMoon did not return a file ID", details: data });
+      const embedUrl = String(file?.urls?.embed || ("https://filemoon.org/" + encodeURIComponent(fileId) + "/embed"));
+      const watchUrl = String(file?.urls?.watch || ("https://filemoon.org/" + encodeURIComponent(fileId) + "/watch"));
+      res.json({ success: true, provider: "filemoon", fileId, providerId: fileId, embedUrl, videoUrl: embedUrl || watchUrl, thumbnailUrl: String(file?.thumbnail_url || file?.thumbnail || "") });
+    } catch (e: any) {
+      console.error("[FileMoon] proxy upload failed:", e);
+      res.status(502).json({ error: "FileMoon upload failed", details: e?.message || String(e), cause: e?.cause?.code || e?.cause?.message || null });
+    } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
   });
   return originalListen.apply(this, args as any);
 };
