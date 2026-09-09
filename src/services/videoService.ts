@@ -1,18 +1,5 @@
-import { Video, Category, Tag, ModerationStatus, VideoVisibility } from '../types';
+import { Video, ModerationStatus, VideoVisibility } from '../types';
 import { supabase } from '../lib/supabase';
-
-export const DEFAULT_CATEGORIES: Category[] = [
-  { id:'cat-tech', name:'Technology & Engineering', slug:'technology', description:'Coding, hardware, AI systems, and tech tutorials', icon:'Cpu', video_count:0 },
-  { id:'cat-cinema', name:'Cinema & Documentary', slug:'cinema', description:'Cinematography, short films, color grading, and lens tests', icon:'Film', video_count:0 },
-  { id:'cat-creative', name:'Creative Arts & Design', slug:'creative-arts', description:'Visual effects, 3D modeling, illustration, and design philosophy', icon:'Palette', video_count:0 },
-  { id:'cat-science', name:'Science & Education', slug:'science', description:'Physics, mathematics, space exploration, and academic lectures', icon:'FlaskConical', video_count:0 },
-  { id:'cat-music', name:'Music & Soundscapes', slug:'music', description:'Original electronic compositions, modular synth jams, and live sets', icon:'Music', video_count:0 },
-  { id:'cat-gaming', name:'Gaming & Esports', slug:'gaming', description:'Speedruns, competitive matches, and interactive gameplay', icon:'Gamepad2', video_count:0 },
-];
-export const DEFAULT_TAGS: Tag[] = [
-  { id:'tag-tutorial', name:'Tutorial', slug:'tutorial' }, { id:'tag-4k', name:'4K Ultra HD', slug:'4k' }, { id:'tag-hls', name:'HLS Stream', slug:'hls' }, { id:'tag-hdr', name:'HDR10', slug:'hdr' }, { id:'tag-oss', name:'Open Source', slug:'open-source' }, { id:'tag-cine', name:'Cinematography', slug:'cinematography' },
-];
-export const DEFAULT_STARTER_VIDEOS: Video[] = [];
 
 async function authHeaders(): Promise<Record<string,string>> { const { data } = await supabase.auth.getSession(); return data.session?.access_token ? { Authorization:`Bearer ${data.session.access_token}` } : {}; }
 async function api<T>(url:string, options:RequestInit = {}):Promise<T> { const tokenHeaders = await authHeaders(); const headers = { ...tokenHeaders, ...(options.headers || {}), ...(options.body ? {'Content-Type':'application/json'} : {}) } as Record<string,string>; const res = await fetch(url, { ...options, headers }); const text = await res.text(); let data:any = {}; try { data = text ? JSON.parse(text) : {}; } catch { data = { error:text }; } if (!res.ok) throw new Error(data.error || `API request failed (${res.status})`); return data as T; }
@@ -27,7 +14,7 @@ export const videoService = {
   async updateVideo(id:string,updates:Partial<Video>):Promise<Video> { const row:any={...updates}; delete row.category; delete row.creator; const r=await api<{video:Video}>(`/api/videos/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(row)}); return r.video; },
   async deleteVideo(id:string):Promise<boolean> { await api(`/api/videos/${encodeURIComponent(id)}`,{method:'DELETE'}); return true; },
   async recordView(videoId:string):Promise<void> { try { const res=await fetch(`/api/videos/${encodeURIComponent(videoId)}/view`,{method:'POST'}); if(!res.ok)throw new Error(`View API returned ${res.status}`); } catch(e){ console.warn('View record failed:',e); } },
-  async getCategories():Promise<Category[]> { const r=await api<{categories:Category[]}>('/api/categories'); return r.categories || []; },
-  async getTags():Promise<Tag[]> { const r=await api<{tags:Tag[]}>('/api/tags'); return r.tags || []; },
+  async getCategories():Promise<import('../types').Category[]> { const r=await api<{categories:import('../types').Category[]}>('/api/categories'); return r.categories || []; },
+  async getTags():Promise<import('../types').Tag[]> { const r=await api<{tags:import('../types').Tag[]}>('/api/tags'); return r.tags || []; },
   async syncFileMoon():Promise<{imported:number;updated:number;total:number}> { return api('/api/filemoon/sync',{method:'POST'}); },
 };
