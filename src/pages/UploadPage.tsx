@@ -100,7 +100,7 @@ export default function UploadPage() {
             category_id: categoryId || undefined,
             creator_id: user.id,
             video_url: result.secure_url,
-            thumbnail_url: result.secure_url.replace(/\\.([a-z0-9]+)(?:\\?.*)?$/i, '.jpg'),
+            thumbnail_url: String(result.secure_url).replace('/video/upload/', '/video/upload/so_0/').replace(/\.[a-z0-9]+(?:\?.*)?$/i, '.jpg'),
             preview_animation_url: '',
             provider: 'cloudinary',
             provider_id: String(result.public_id),
