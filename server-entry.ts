@@ -43,82 +43,60 @@ function findValue(value: any, keys: string[]): any {
   return null;
 }
 
-function extractVideo(payload: any) {
-  const vid = findValue(payload, ["vid", "video_id", "videoId", "id"]);
-  const embed = findValue(payload, ["embed", "embed_url", "embedUrl", "embed_link", "player", "player_url", "playerUrl"]);
-  const link = findValue(payload, ["link", "url", "play", "play_url", "playUrl", "video_url", "videoUrl", "direct", "direct_url"]);
-  const thumbnail = findValue(payload, ["thumbnail", "thumbnail_url", "thumbnailUrl", "thumb", "poster", "poster_url", "image"]);
-  return { vid: vid ? String(vid) : "", embed: embed ? String(embed) : "", link: link ? String(link) : "", thumbnail: thumbnail ? String(thumbnail) : "" };
-}
-
-function postUpload18(form: FormData, callback: (error: any, response?: any, body?: string) => void) {
-  form.getLength((lengthError: any, length: number) => {
-    if (lengthError) return callback(lengthError);
-    form.submit({
-      protocol: "https:",
-      host: "upload18.net",
-      path: "/api/upload",
-      headers: {
-        ...form.getHeaders(),
-        Authorization: `Bearer ${String(process.env.UPLOAD18_API_KEY || "").trim()}`,
-        Accept: "application/json",
-        "Content-Length": String(length),
-      },
-    }, (error: any, response: any) => {
-      if (error) return callback(error);
-      let body = "";
-      response.setEncoding("utf8");
-      response.on("data", (chunk: string) => { body += chunk; });
-      response.on("end", () => callback(null, response, body));
-      response.on("error", (err: any) => callback(err));
-    });
-  });
+function extractStreamtapeId(value: string): string | null {
+  const source = String(value || "").trim();
+  const iframe = source.match(/<iframe[^>]+src=["']([^"']+)["']/i)?.[1] || source;
+  const match = iframe.match(/streamtape\.com\/(?:e|v)\/([^/?#"']+)/i);
+  return match?.[1] || null;
 }
 
 const originalListen = express.application.listen;
 (express.application as any).listen = function(this: any, ...args: any[]) {
-  this.post("/api/upload18/proxy-upload", upload.single("file"), async (req: any, res: any) => {
+  this.post("/api/streamtape/proxy-upload", upload.single("file"), async (req: any, res: any) => {
     let tempPath = "";
     try {
       if (!(await requireAdmin(req, res))) return;
-      const key = String(process.env.UPLOAD18_API_KEY || "").trim();
-      if (!key) return res.status(500).json({ error: "Upload18 is not configured. Set UPLOAD18_API_KEY on Railway." });
+      const login = String(process.env.STREAMTAPE_API_LOGIN || "").trim();
+      const key = String(process.env.STREAMTAPE_API_KEY || "").trim();
+      if (!login || !key) return res.status(500).json({ error: "Streamtape is not configured. Set STREAMTAPE_API_LOGIN and STREAMTAPE_API_KEY on Railway." });
       if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
       tempPath = req.file.path;
-      const cid = String(process.env.UPLOAD18_CID || "15").trim();
-      const fid = String(process.env.UPLOAD18_FID || "").trim();
+      const folder = String(process.env.STREAMTAPE_FOLDER || "").trim();
+      const initUrl = new URL("https://api.streamtape.com/file/ul");
+      initUrl.searchParams.set("login", login);
+      initUrl.searchParams.set("key", key);
+      if (folder) initUrl.searchParams.set("folder", folder);
+      const initResponse = await fetch(initUrl, { signal: AbortSignal.timeout(30000) });
+      const initBody = await initResponse.text();
+      let initData: any = {};
+      try { initData = JSON.parse(initBody); } catch { initData = { raw: initBody }; }
+      if (!initResponse.ok) return res.status(502).json({ error: "Streamtape upload initialization failed", upstreamStatus: initResponse.status, details: initData });
+      const uploadUrl = String(findValue(initData, ["url", "upload_url", "uploadUrl"]) || "").trim();
+      if (!uploadUrl) return res.status(502).json({ error: "Streamtape did not return an upload URL", details: initData });
+
       const form = new FormData();
-      form.append("cid", cid);
-      if (fid) form.append("fid", fid);
-      form.append("video", fs.createReadStream(tempPath), {
-        filename: req.file.originalname || "video.mp4",
-        contentType: req.file.mimetype || "application/octet-stream",
-        knownLength: Number(req.file.size || 0) || undefined,
-      });
-      const { response, body } = await new Promise<{ response: any; body: string }>((resolve, reject) => {
-        postUpload18(form, (error, upstreamResponse, upstreamBody) => {
+      form.append("file1", fs.createReadStream(tempPath), { filename: req.file.originalname || "video.mp4", contentType: req.file.mimetype || "application/octet-stream", knownLength: Number(req.file.size || 0) || undefined });
+      const length = await new Promise<number>((resolve, reject) => form.getLength((err, n) => err ? reject(err) : resolve(n)));
+      const upstream = await new Promise<{statusCode:number, body:string}>((resolve, reject) => {
+        form.submit(uploadUrl, { headers: { ...form.getHeaders(), "Content-Length": String(length) } }, (error: any, response: any) => {
           if (error) return reject(error);
-          resolve({ response: upstreamResponse, body: upstreamBody || "" });
+          let body = ""; response.setEncoding("utf8");
+          response.on("data", (part: string) => { body += part; });
+          response.on("end", () => resolve({ statusCode: Number(response.statusCode || 0), body }));
+          response.on("error", reject);
         });
       });
       let data: any = {};
-      try { data = JSON.parse(body); } catch { data = { raw: body }; }
-      console.log(`[Upload18] upstream HTTP ${response?.statusCode || "unknown"}: ${body.slice(0, 3000)}`);
-      if (!response || response.statusCode < 200 || response.statusCode >= 300) return res.status(502).json({ error: "Upload18 upload failed", upstreamStatus: response?.statusCode || null, details: data });
-      let result = extractVideo(data);
-      if (result.vid && (!result.embed || !result.thumbnail)) {
-        try {
-          const detailRes = await fetch(`https://upload18.net/api/getvideodetail/${encodeURIComponent(result.vid)}`, { headers: { Authorization: `Bearer ${key}`, Accept: "application/json" }, signal: AbortSignal.timeout(30000) });
-          if (detailRes.ok) result = { ...result, ...Object.fromEntries(Object.entries(extractVideo(await detailRes.json())).filter(([, v]) => v)) };
-        } catch {}
-      }
-      if (!result.vid) return res.status(502).json({ error: "Upload18 did not return a video ID", details: data });
-      const playUrl = result.link || `https://upload18.net/play/${encodeURIComponent(result.vid)}`;
-      const embedUrl = result.embed || playUrl;
-      res.json({ success: true, provider: "upload18", vid: result.vid, videoId: result.vid, embedUrl, videoUrl: playUrl, thumbnailUrl: result.thumbnail || "", status: data?.status ?? data?.data?.status ?? null, raw: data });
+      try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; }
+      console.log(`[Streamtape] upload HTTP ${upstream.statusCode}: ${upstream.body.slice(0, 3000)}`);
+      if (upstream.statusCode < 200 || upstream.statusCode >= 300) return res.status(502).json({ error: "Streamtape upload failed", upstreamStatus: upstream.statusCode, details: data });
+      const fileId = String(findValue(data, ["fileId", "file_id", "id", "fileid"]) || "").trim();
+      if (!fileId) return res.status(502).json({ error: "Streamtape did not return a file ID", details: data });
+      const embedUrl = `https://streamtape.com/e/${encodeURIComponent(fileId)}`;
+      res.json({ success: true, provider: "streamtape", fileId, providerId: fileId, embedUrl, videoUrl: embedUrl, thumbnailUrl: "" });
     } catch (e: any) {
-      console.error("[Upload18] proxy upload failed:", e);
-      res.status(502).json({ error: "Upload18 upload failed", details: e?.message || String(e), cause: e?.cause?.code || e?.cause?.message || null });
+      console.error("[Streamtape] proxy upload failed:", e);
+      res.status(502).json({ error: e?.message || "Streamtape upload failed", details: e?.cause?.message || String(e), cause: e?.cause?.code || null });
     } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
   });
 
@@ -137,59 +115,36 @@ const originalListen = express.application.listen;
       const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
       const uploadId = crypto.randomUUID();
       let lastData: any = null;
-
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
         const start = chunkIndex * CHUNK_SIZE;
         const end = Math.min(fileSize, start + CHUNK_SIZE);
         const chunkLength = Math.max(0, end - start);
         const chunk = await new Promise<Buffer>((resolve, reject) => {
-          const stream = fs.createReadStream(tempPath, { start, end: end - 1 });
-          const parts: Buffer[] = [];
+          const stream = fs.createReadStream(tempPath, { start, end: end - 1 }); const parts: Buffer[] = [];
           stream.on("data", (part: Buffer | string) => parts.push(Buffer.isBuffer(part) ? part : Buffer.from(part)));
-          stream.on("end", () => resolve(Buffer.concat(parts)));
-          stream.on("error", reject);
+          stream.on("end", () => resolve(Buffer.concat(parts))); stream.on("error", reject);
         });
         const form = new FormData();
-        form.append("file", chunk, { filename: fileName, contentType: mimeType, knownLength: chunkLength });
-        form.append("visibility", "1");
-        if (totalChunks > 1) {
-          form.append("dzuuid", uploadId);
-          form.append("dzchunkindex", String(chunkIndex));
-          form.append("dztotalchunkcount", String(totalChunks));
-          form.append("dzchunksize", String(CHUNK_SIZE));
-          form.append("dztotalfilesize", String(fileSize));
-          form.append("dzchunkbyteoffset", String(start));
-        }
+        form.append("file", chunk, { filename: fileName, contentType: mimeType, knownLength: chunkLength }); form.append("visibility", "1");
+        if (totalChunks > 1) { form.append("dzuuid", uploadId); form.append("dzchunkindex", String(chunkIndex)); form.append("dztotalchunkcount", String(totalChunks)); form.append("dzchunksize", String(CHUNK_SIZE)); form.append("dztotalfilesize", String(fileSize)); form.append("dzchunkbyteoffset", String(start)); }
         const length = await new Promise<number>((resolve, reject) => form.getLength((err, n) => err ? reject(err) : resolve(n)));
         const upstream = await new Promise<{statusCode:number, body:string}>((resolve, reject) => {
           form.submit({ protocol: "https:", host: "filemoon.org", path: "/api/v1/files/upload", headers: { ...form.getHeaders(), Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Length": String(length) } }, (error: any, response: any) => {
-            if (error) return reject(error);
-            let body = ""; response.setEncoding("utf8");
-            response.on("data", (part: string) => { body += part; });
-            response.on("end", () => resolve({ statusCode: Number(response.statusCode || 0), body }));
-            response.on("error", reject);
+            if (error) return reject(error); let body = ""; response.setEncoding("utf8"); response.on("data", (part: string) => { body += part; }); response.on("end", () => resolve({ statusCode: Number(response.statusCode || 0), body })); response.on("error", reject);
           });
         });
-        let data: any = {};
-        try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; }
-        console.log(`[FileMoon] chunk ${chunkIndex + 1}/${totalChunks} upstream HTTP ${upstream.statusCode}: ${upstream.body.slice(0, 2000)}`);
-        if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
-          const apiMessage = data?.error?.message || data?.error || data?.message || "FileMoon upload failed";
-          return res.status(502).json({ error: String(apiMessage), upstreamStatus: upstream.statusCode, requestId: data?.request_id || null, details: data });
-        }
+        let data: any = {}; try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; }
+        if (upstream.statusCode < 200 || upstream.statusCode >= 300) return res.status(502).json({ error: String(data?.error?.message || data?.error || data?.message || "FileMoon upload failed"), upstreamStatus: upstream.statusCode, requestId: data?.request_id || null, details: data });
         lastData = data;
       }
-
       const file = lastData?.data || lastData?.file || {};
       const fileId = String(file?.id || file?.file_id || "").trim();
-      if (!fileId) return res.status(502).json({ error: "FileMoon did not return a file ID", upstreamStatus: 200, details: lastData });
+      if (!fileId) return res.status(502).json({ error: "FileMoon did not return a file ID", details: lastData });
       const embedUrl = String(file?.urls?.embed || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`);
       const watchUrl = String(file?.urls?.watch || `https://filemoon.org/${encodeURIComponent(fileId)}/watch`);
       res.json({ success: true, provider: "filemoon", fileId, providerId: fileId, embedUrl, videoUrl: embedUrl || watchUrl, thumbnailUrl: String(file?.thumbnail_url || file?.thumbnail || "") });
-    } catch (e: any) {
-      console.error("[FileMoon] proxy upload failed:", e);
-      res.status(502).json({ error: e?.message || "FileMoon upload failed", details: e?.cause?.message || String(e), cause: e?.cause?.code || null });
-    } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
+    } catch (e: any) { console.error("[FileMoon] proxy upload failed:", e); res.status(502).json({ error: e?.message || "FileMoon upload failed", details: e?.cause?.message || String(e), cause: e?.cause?.code || null }); }
+    finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
   });
   return originalListen.apply(this, args as any);
 };
