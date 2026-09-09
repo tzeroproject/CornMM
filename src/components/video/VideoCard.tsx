@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { CheckCircle, Eye, Heart, Clock, MoreVertical, Share2, Flag, Bookmark } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Video } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { interactionService } from '../../services/interactionService';
@@ -19,14 +19,35 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
   const [isFavorited, setIsFavorited] = useState(video.is_favorited || false);
   const previewRef = useRef<HTMLVideoElement>(null);
   const stopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [thumbnailFailed, setThumbnailFailed] = useState(false);
+  const [thumbnailIndex, setThumbnailIndex] = useState(0);
+
   const bunnyThumbnail = video.bunny_video_id
     ? `https://vz-${video.bunny_video_id.slice(0, 3)}.b-cdn.net/${video.bunny_video_id}/thumbnail.jpg`
     : '';
   const uqloadThumbnail = video.provider === 'uqload' && video.provider_id
     ? `/api/uqload/thumbnail/${encodeURIComponent(video.provider_id)}`
     : '';
-  const thumbnailSrc = (!thumbnailFailed && video.thumbnail_url) || bunnyThumbnail || uqloadThumbnail || '';
+
+  // FileMoon does not currently expose a thumbnail URL in the v1 file-list response.
+  // Keep the provider-generated thumbnail as a fallback for existing and newly synced videos.
+  const filemoonThumbnails = video.provider === 'filemoon' && video.provider_id
+    ? [
+        `https://thumbs.filemoon.sx/${encodeURIComponent(video.provider_id)}.jpg`,
+        `https://thumbs.filemoon.sx/${encodeURIComponent(video.provider_id)}_t.jpg`,
+      ]
+    : [];
+
+  const thumbnailCandidates = [
+    video.thumbnail_url || '',
+    bunnyThumbnail,
+    uqloadThumbnail,
+    ...filemoonThumbnails,
+  ].filter(Boolean);
+  const thumbnailSrc = thumbnailCandidates[thumbnailIndex] || '';
+
+  const handleThumbnailError = () => {
+    setThumbnailIndex((current) => Math.min(current + 1, Math.max(0, thumbnailCandidates.length - 1)));
+  };
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -50,6 +71,10 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
     if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
     return `${Math.floor(diffDays / 365)}y ago`;
   };
+
+  useEffect(() => {
+    setThumbnailIndex(0);
+  }, [video.id, video.thumbnail_url, video.provider_id]);
 
   useEffect(() => {
     const el = previewRef.current;
@@ -161,12 +186,11 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, onOpenReport, onOpe
 
   return (
     <div className="group relative flex flex-col rounded-xl sm:rounded-2xl bg-[#0a0a0a] border border-white/5 hover:border-white/15 transition-all duration-300 overflow-hidden hover:shadow-xl hover:shadow-black">
-      {/* 3-second muted video preview using video_url; no preview animation URL required. */}
       <Link to={`/watch/${video.slug || video.id}`} className="relative aspect-video w-full overflow-hidden bg-[#050505]">
         <img
           src={thumbnailSrc}
           alt={video.title}
-          onError={() => setThumbnailFailed(true)}
+          onError={handleThumbnailError}
           loading="lazy"
           className="absolute inset-0 w-full h-full object-cover"
         />
