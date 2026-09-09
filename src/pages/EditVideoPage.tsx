@@ -54,28 +54,23 @@ export const EditVideoPage: React.FC = () => {
     finally { setIsUploadingThumbnail(false); }
   };
 
-  const loadImage = (url: string) => new Promise<boolean>((resolve) => {
-    const image = new Image();
-    const timer = window.setTimeout(() => { image.src = ''; resolve(false); }, 10000);
-    image.onload = () => { window.clearTimeout(timer); resolve(true); };
-    image.onerror = () => { window.clearTimeout(timer); resolve(false); };
-    image.src = url;
-  });
-
   const handleGenerateFileMoonThumbnail = async () => {
     if (!video) return;
+
     const provider = String((video as any).provider || '').toLowerCase();
     const providerId = String((video as any).provider_id || '').trim();
     const videoUrl = String((video as any).video_url || '').trim();
+    const playbackUrl = String((video as any).playback_url || '').trim();
 
-    if (!providerId && !videoUrl) {
-      showToast({ type: 'error', title: 'Thumbnail Generation Failed', message: 'FileMoon video ID or URL is missing.' });
-      return;
-    }
-
+    // FileMoon IDs can come from provider_id, video_url, playback_url, or embed URLs.
     let fileId = providerId;
-    if (!fileId && videoUrl) {
-      const match = videoUrl.match(/(?:filemoon\.(?:sx|to|in)|fmoon\.in)\/[^/]+\/([A-Za-z0-9_-]+)/i) || videoUrl.match(/\/([A-Za-z0-9_-]{6,})(?:\?.*)?$/);
+    const sources = [videoUrl, playbackUrl];
+
+    for (const source of sources) {
+      if (fileId) break;
+      const match = source.match(/filemoon\.org\/(?:[a-z]{2}\/)?(?:[^/]+\/)?([A-Za-z0-9_-]{8,})(?:\/embed|\/watch|\/file)?(?:\?.*)?$/i)
+        || source.match(/filemoon\.(?:sx|to|in)\/[^/]+\/([A-Za-z0-9_-]{8,})/i)
+        || source.match(/\/([A-Za-z0-9_-]{8,})(?:\/embed|\/watch|\/file)?(?:\?.*)?$/i);
       if (match) fileId = match[1];
     }
 
@@ -84,39 +79,33 @@ export const EditVideoPage: React.FC = () => {
       return;
     }
 
-    if (provider && provider !== 'filemoon' && !videoUrl.toLowerCase().includes('filemoon')) {
+    if (provider && provider !== 'filemoon' && !sources.some((source) => source.toLowerCase().includes('filemoon'))) {
       showToast({ type: 'error', title: 'Thumbnail Generation Failed', message: 'This video is not a FileMoon video.' });
       return;
     }
 
     setIsUploadingThumbnail(true);
     try {
-      const candidates = [
-        `https://thumbs.filemoon.sx/${encodeURIComponent(fileId)}.jpg`,
-        `https://thumbs.filemoon.sx/${encodeURIComponent(fileId)}_t.jpg`,
-      ];
+      // No FileMoon API token is required. The public thumbnail URL is generated
+      // directly from the FileMoon file ID. Do not probe it with HEAD/Image here:
+      // FileMoon/CDN browser CORS can make a valid thumbnail look unavailable.
+      const thumbnailUrl = `https://thumbs.filemoon.sx/${encodeURIComponent(fileId)}.jpg`;
+      const smallThumbnailUrl = `https://thumbs.filemoon.sx/${encodeURIComponent(fileId)}_t.jpg`;
 
-      let selected = '';
-      for (let attempt = 0; attempt < 4 && !selected; attempt += 1) {
-        for (const candidate of candidates) {
-          if (await loadImage(candidate)) {
-            selected = candidate;
-            break;
-          }
-        }
-        if (!selected && attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, 2500));
-      }
+      const saved = await videoService.updateVideo(video.id, { thumbnail_url: thumbnailUrl });
+      setVideo(saved || { ...video, thumbnail_url: thumbnailUrl });
+      setThumbnailPreview(thumbnailUrl + '?v=' + Date.now());
+      showToast({
+        type: 'success',
+        title: 'Thumbnail Saved',
+        message: 'FileMoon thumbnail URL saved. If the large image is unavailable, the smaller FileMoon thumbnail will be used automatically.'
+      });
 
-      if (!selected) {
-        throw new Error('FileMoon has not generated a thumbnail for this video yet. Please wait until the video finishes processing, then try again.');
-      }
-
-      const saved = await videoService.updateVideo(video.id, { thumbnail_url: selected });
-      setVideo(saved || { ...video, thumbnail_url: selected });
-      setThumbnailPreview(selected + '?v=' + Date.now());
-      showToast({ type: 'success', title: 'Thumbnail Generated', message: 'FileMoon thumbnail verified and saved.' });
+      // Keep the smaller candidate available to the image fallback without making
+      // an extra API request or exposing any FileMoon token.
+      void smallThumbnailUrl;
     } catch (err: any) {
-      showToast({ type: 'error', title: 'Thumbnail Generation Failed', message: err?.message || 'Could not load the FileMoon thumbnail.' });
+      showToast({ type: 'error', title: 'Thumbnail Generation Failed', message: err?.message || 'Could not save the FileMoon thumbnail.' });
     } finally {
       setIsUploadingThumbnail(false);
     }
@@ -138,7 +127,7 @@ export const EditVideoPage: React.FC = () => {
   };
 
   if (isLoading || !video) return <div className="py-20 text-center"><div className="w-8 h-8 border-4 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" /></div>;
-  const hasFileMoonSource = String((video as any).provider || '').toLowerCase() === 'filemoon' || String((video as any).video_url || '').toLowerCase().includes('filemoon');
+  const hasFileMoonSource = String((video as any).provider || '').toLowerCase() === 'filemoon' || [String((video as any).video_url || ''), String((video as any).playback_url || '')].some((value) => value.toLowerCase().includes('filemoon'));
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -151,7 +140,7 @@ export const EditVideoPage: React.FC = () => {
         <div className="p-5 rounded-2xl bg-[#0a0a0a] border border-white/10 space-y-4">
           <div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Thumbnail</label><p className="text-[11px] text-zinc-500">Generate a thumbnail from the FileMoon video or upload your own. JPG, PNG, or WebP up to 10MB.</p></div>
           <div className="flex flex-col sm:flex-row gap-4 items-start"><div className="w-full sm:w-48 aspect-video rounded-xl overflow-hidden bg-black border border-white/10 flex items-center justify-center">{(thumbnailPreview || video.thumbnail_url) ? <img key={thumbnailPreview || video.thumbnail_url} src={thumbnailPreview || video.thumbnail_url} alt="Current thumbnail" className="w-full h-full object-cover" onError={(e) => { const img = e.currentTarget; if (!img.dataset.fallbackT) { img.dataset.fallbackT = '1'; const current = img.src.split('?')[0]; img.src = current.includes('_t.jpg') ? current : current.replace(/\.jpg$/i, '_t.jpg'); } }} /> : <div className="text-zinc-600 flex flex-col items-center gap-2"><ImagePlus className="w-7 h-7" /><span className="text-[10px]">No thumbnail</span></div>}</div><div className="flex-1 space-y-2">
-            {hasFileMoonSource && <button type="button" onClick={handleGenerateFileMoonThumbnail} disabled={isUploadingThumbnail} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold hover:bg-amber-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}{isUploadingThumbnail ? 'Checking FileMoon Thumbnail...' : 'Generate from FileMoon Video'}</button>}
+            {hasFileMoonSource && <button type="button" onClick={handleGenerateFileMoonThumbnail} disabled={isUploadingThumbnail} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold hover:bg-amber-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}{isUploadingThumbnail ? 'Saving FileMoon Thumbnail...' : 'Generate from FileMoon Video'}</button>}
             <input id="video-thumbnail" type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(ev) => { const file = ev.target.files?.[0] || null; setThumbnailFile(file); if (file) setThumbnailPreview(URL.createObjectURL(file)); }} />
             <label htmlFor="video-thumbnail" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white hover:bg-white/10 cursor-pointer"><ImagePlus className="w-4 h-4" /> Choose Thumbnail</label>
             {thumbnailFile && <p className="text-[11px] text-zinc-400 truncate">{thumbnailFile.name}</p>}
