@@ -33,12 +33,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
   const url = String(video.video_url || '').trim();
   const providerId = String((video as any).provider_id || '').trim();
 
-  const isUqloadEmbed = provider === 'uqload' || /uqload\.vc\/e\//i.test(url);
-  const isDoodstreamEmbed = provider === 'doodstream' || /dood(?:\.to|\.la|\.so)\/e\//i.test(url);
-  const isFilemoonEmbed = provider === 'filemoon' || /filemoon\.org\//i.test(url);
-  const isStreamtapeEmbed = provider === 'streamtape' || /streamtape\.com\/(?:e|v)\/[^/?#]+/i.test(url);
-  const isAnyEmbed = provider === 'embed' || provider === 'any_embed' || provider === 'any-embed' || (provider === '' && /^https?:\/\//i.test(url));
-  const isExternal = isUqloadEmbed || isDoodstreamEmbed || isFilemoonEmbed || isStreamtapeEmbed || isAnyEmbed;
+  const isAnyEmbed = provider === 'embed' || provider === 'any_embed' || provider === 'any-embed';
+  const isUqloadEmbed = !isAnyEmbed && (provider === 'uqload' || /uqload\.vc\/e\//i.test(url));
+  const isDoodstreamEmbed = !isAnyEmbed && (provider === 'doodstream' || /dood(?:\.to|\.la|\.so)\/e\//i.test(url));
+  const isFilemoonEmbed = !isAnyEmbed && (provider === 'filemoon' || /filemoon\.org\//i.test(url));
+  const isStreamtapeEmbed = !isAnyEmbed && (provider === 'streamtape' || /streamtape\.com\/(?:e|v)\/[^/?#]+/i.test(url));
+  const isGenericExternal = isAnyEmbed || (provider === '' && /^https?:\/\//i.test(url));
+  const isExternal = isUqloadEmbed || isDoodstreamEmbed || isFilemoonEmbed || isStreamtapeEmbed || isGenericExternal;
 
   useEffect(() => {
     if (isExternal) return;
@@ -111,7 +112,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
   const togglePlay = () => {
     const el = videoRef.current;
     if (!el) return;
-
     if (el.paused) {
       if (!isMuted) {
         el.muted = false;
@@ -130,17 +130,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
   const handleTimeUpdate = () => {
     const el = videoRef.current;
     if (!el) return;
-
     const curr = el.currentTime;
     const dur = el.duration || video.duration || 0;
     setCurrentTime(curr);
     setDuration(dur);
-
     if (onProgress && (curr - lastProgressRef.current >= 5 || curr < 1)) {
       lastProgressRef.current = curr;
       onProgress(curr, dur);
     }
-
     if (!viewRecordedRef.current && curr >= 5) {
       viewRecordedRef.current = true;
       videoService.recordView(video.id);
@@ -207,7 +204,6 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
         seekRelative(-5);
       }
     };
-
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [isPlaying, duration, volume, isMuted]);
@@ -221,6 +217,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
   if (isExternal) {
+    // Any Embed Link must preserve the exact supplied iframe src. In particular,
+    // do not rewrite FileMoon URLs pasted through the generic embed field.
     let src = url;
 
     if (isFilemoonEmbed) {
@@ -233,7 +231,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
       src = match?.[1] ? `https://streamtape.com/e/${match[1]}` : url;
     }
 
-    const iframeMatch = src.match(/src\s*=\s*["'](.*?)["']/i);
+    const iframeMatch = src.match(/<iframe[^>]*\bsrc\s*=\s*["'](.*?)["']/i);
     if (iframeMatch?.[1]) src = iframeMatch[1];
 
     return (
@@ -282,50 +280,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ video, onProgress, onC
       )}
 
       <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/75 to-transparent p-3 sm:p-4 flex flex-col gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-        <input
-          aria-label="Video progress"
-          type="range"
-          min={0}
-          max={duration || 100}
-          step={0.1}
-          value={Math.min(currentTime, duration || 100)}
-          onChange={handleSeek}
-          className="w-full h-1.5 appearance-none bg-white/20 accent-amber-400 cursor-pointer"
-        />
-
+        <input aria-label="Video progress" type="range" min={0} max={duration || 100} step={0.1} value={Math.min(currentTime, duration || 100)} onChange={handleSeek} className="w-full h-1.5 appearance-none bg-white/20 accent-amber-400 cursor-pointer" />
         <div className="flex items-center justify-between text-white text-xs">
           <div className="flex items-center gap-2 sm:gap-3">
-            <button aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlay} className="p-1.5 rounded-lg hover:bg-white/10">
-              {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
-            </button>
-            <button aria-label="Rewind 10 seconds" onClick={() => seekRelative(-10)} className="p-1.5 rounded-lg hover:bg-white/10">
-              <RotateCcw className="w-4 h-4" />
-            </button>
-            <button aria-label={isMuted ? 'Unmute' : 'Mute'} onClick={toggleMute} className="p-1.5 rounded-lg hover:bg-white/10">
-              {isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-            </button>
+            <button aria-label={isPlaying ? 'Pause' : 'Play'} onClick={togglePlay} className="p-1.5 rounded-lg hover:bg-white/10">{isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}</button>
+            <button aria-label="Rewind 10 seconds" onClick={() => seekRelative(-10)} className="p-1.5 rounded-lg hover:bg-white/10"><RotateCcw className="w-4 h-4" /></button>
+            <button aria-label={isMuted ? 'Unmute' : 'Mute'} onClick={toggleMute} className="p-1.5 rounded-lg hover:bg-white/10">{isMuted || volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}</button>
             <span className="font-mono text-[11px]">{formatTime(currentTime)} / {formatTime(duration)}</span>
           </div>
-
           <div className="flex items-center gap-1">
             <div className="relative">
-              <button aria-label="Playback speed" onClick={() => setShowSpeedMenu((value) => !value)} className="p-1.5 rounded-lg hover:bg-white/10">
-                <Settings className="w-4 h-4" />
-              </button>
-              {showSpeedMenu && (
-                <div className="absolute bottom-9 right-0 p-1 rounded-xl bg-[#111] border border-white/10 shadow-xl flex gap-1">
-                  {[0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                    <button key={speed} onClick={() => setSpeed(speed)} className={`px-2 py-1 rounded text-[10px] ${playbackSpeed === speed ? 'bg-amber-500 text-black' : 'text-white hover:bg-white/10'}`}>
-                      {speed}x
-                    </button>
-                  ))}
-                </div>
-              )}
+              <button aria-label="Playback speed" onClick={() => setShowSpeedMenu((value) => !value)} className="p-1.5 rounded-lg hover:bg-white/10"><Settings className="w-4 h-4" /></button>
+              {showSpeedMenu && <div className="absolute bottom-9 right-0 p-1 rounded-xl bg-[#111] border border-white/10 shadow-xl flex gap-1">{[0.75, 1, 1.25, 1.5, 2].map((speed) => <button key={speed} onClick={() => setSpeed(speed)} className={`px-2 py-1 rounded text-[10px] ${playbackSpeed === speed ? 'bg-amber-500 text-black' : 'text-white hover:bg-white/10'}`}>{speed}x</button>)}</div>}
             </div>
-
-            <button aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} onClick={toggleFullscreen} className="p-1.5 rounded-lg hover:bg-white/10">
-              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-            </button>
+            <button aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} onClick={toggleFullscreen} className="p-1.5 rounded-lg hover:bg-white/10">{isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}</button>
           </div>
         </div>
       </div>
