@@ -19,6 +19,7 @@ async function requireAdmin(req: any, res: any): Promise<boolean> { if (!supabas
 async function getAuthenticatedUser(req: any): Promise<any | null> { if (!supabaseAdmin) return null; const token = bearerToken(req); if (!token) return null; const { data } = await supabaseAdmin.auth.getUser(token); return data?.user || null; }
 function findValue(value: any, keys: string[]): any { if (!value || typeof value !== "object") return null; for (const key of keys) if (value[key] !== undefined && value[key] !== null && String(value[key]).trim()) return value[key]; for (const child of Array.isArray(value) ? value : Object.values(value)) { const found = findValue(child, keys); if (found !== null) return found; } return null; }
 function makeSlug(title: string, providerId: string): string { const base = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "filemoon-video"; return `${base}-${providerId.toLowerCase()}`; }
+function getFileMoonToken(account: string): string { const normalized = String(account || "1").trim() === "2" ? "2" : "1"; return String(process.env[`FILEMOON_API_TOKEN_${normalized}`] || (normalized === "1" ? process.env.FILEMOON_API_TOKEN : "") || "").trim(); }
 
 const originalListen = express.application.listen;
 (express.application as any).listen = function(this: any, ...args: any[]) {
@@ -45,8 +46,9 @@ const originalListen = express.application.listen;
     let tempPath = "";
     try {
       if (!(await requireAdmin(req, res))) return;
-      const token = String(process.env.FILEMOON_API_TOKEN || "").trim();
-      if (!token) return res.status(500).json({ error: "FileMoon is not configured. Set FILEMOON_API_TOKEN on Railway." });
+      const account = String(req.body?.filemoon_account || "1").trim() === "2" ? "2" : "1";
+      const token = getFileMoonToken(account);
+      if (!token) return res.status(500).json({ error: `FileMoon Account ${account} is not configured. Set FILEMOON_API_TOKEN_${account} on Railway.` });
       if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
       tempPath = req.file.path;
       const fileName = req.file.originalname || "video.mp4";
@@ -63,14 +65,7 @@ const originalListen = express.application.listen;
         const form = new FormData();
         form.append("file", fs.createReadStream(tempPath, { start, end: Math.max(start, endExclusive - 1) }), { filename: fileName, contentType: mimeType, knownLength: chunkLength });
         form.append("visibility", "1");
-        if (totalChunks > 1) {
-          form.append("dzuuid", uploadId);
-          form.append("dzchunkindex", String(chunkIndex));
-          form.append("dztotalchunkcount", String(totalChunks));
-          form.append("dzchunksize", String(CHUNK_SIZE));
-          form.append("dztotalfilesize", String(fileSize));
-          form.append("dzchunkbyteoffset", String(start));
-        }
+        if (totalChunks > 1) { form.append("dzuuid", uploadId); form.append("dzchunkindex", String(chunkIndex)); form.append("dztotalchunkcount", String(totalChunks)); form.append("dzchunksize", String(CHUNK_SIZE)); form.append("dztotalfilesize", String(fileSize)); form.append("dzchunkbyteoffset", String(start)); }
         const length = await new Promise<number>((resolve, reject) => form.getLength((err, n) => err ? reject(err) : resolve(n)));
         return new Promise((resolve, reject) => {
           const request = https.request({ protocol: "https:", hostname: "filemoon.org", path: "/api/v1/files/upload", method: "POST", headers: { ...form.getHeaders(), Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Length": String(length), "User-Agent": "CornMM-FileMoon/1.0" }, timeout: 30 * 60 * 1000 }, (response: any) => {
@@ -84,9 +79,9 @@ const originalListen = express.application.listen;
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
         let upstream = await sendRequest(chunkIndex);
         if (upstream.statusCode === 429) { const waitSeconds = Math.min(Math.max(upstream.retryAfter || 5, 1), 120); await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000)); upstream = await sendRequest(chunkIndex); }
-        console.log(`[FileMoon] upload chunk ${chunkIndex + 1}/${totalChunks} HTTP ${upstream.statusCode} requestId=${upstream.requestId || "-"}: ${upstream.body.slice(0, 3000)}`);
+        console.log(`[FileMoon Account ${account}] upload chunk ${chunkIndex + 1}/${totalChunks} HTTP ${upstream.statusCode} requestId=${upstream.requestId || "-"}: ${upstream.body.slice(0, 3000)}`);
         let data:any = {}; try { data = JSON.parse(upstream.body); } catch { data = { raw:upstream.body }; }
-        if (upstream.statusCode < 200 || upstream.statusCode >= 300) { const upstreamMessage = String(data?.error?.message || data?.error || data?.message || "FileMoon upload failed"); return res.status(502).json({ error:`FileMoon upload failed: ${upstreamMessage}`, upstreamStatus:upstream.statusCode, chunk:chunkIndex, totalChunks, requestId:data?.request_id || upstream.requestId || null, details:data }); }
+        if (upstream.statusCode < 200 || upstream.statusCode >= 300) { const upstreamMessage = String(data?.error?.message || data?.error || data?.message || "FileMoon upload failed"); return res.status(502).json({ error:`FileMoon Account ${account} upload failed: ${upstreamMessage}`, upstreamStatus:upstream.statusCode, chunk:chunkIndex, totalChunks, requestId:data?.request_id || upstream.requestId || null, details:data }); }
         finalResponse = { statusCode:upstream.statusCode, body:upstream.body };
       }
       if (!finalResponse) return res.status(502).json({ error:"FileMoon upload did not return a response" });
@@ -97,9 +92,6 @@ const originalListen = express.application.listen;
       const embedUrl = String(file?.urls?.embed || data?.urls?.embed || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`);
       const watchUrl = String(file?.urls?.watch || data?.urls?.watch || `https://filemoon.org/${encodeURIComponent(fileId)}/watch`);
       const thumbnailUrl = String(file?.thumbnail_url || file?.thumbnail || data?.thumbnail_url || data?.thumbnail || "");
-
-      // Save the successful FileMoon upload immediately. This is intentionally done on the server
-      // so the video is persisted even if the browser closes after the provider upload succeeds.
       const user = await getAuthenticatedUser(req);
       if (!supabaseAdmin) return res.status(500).json({ error:"Supabase server configuration missing after FileMoon upload", fileId, providerId:fileId, embedUrl });
       const title = String(req.body?.title || fileName.replace(/\.[^.]+$/, "") || `FileMoon ${fileId}`).trim();
@@ -115,17 +107,16 @@ const originalListen = express.application.listen;
         if (insertError) throw insertError;
         videoId = createdVideo?.id || null;
       }
-      return res.json({ success:true, provider:"filemoon", fileId, providerId:fileId, embedUrl, watchUrl, videoUrl:embedUrl || watchUrl, thumbnailUrl, videoId, savedToSupabase:true });
-    } catch (e:any) {
-      console.error("[FileMoon] proxy upload failed:", e);
-      return res.status(502).json({ error:e?.message || "FileMoon upload failed", details:e?.cause?.message || String(e), cause:e?.cause?.code || null });
-    } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
+      return res.json({ success:true, provider:"filemoon", account, fileId, providerId:fileId, embedUrl, watchUrl, videoUrl:embedUrl || watchUrl, thumbnailUrl, videoId, savedToSupabase:true });
+    } catch (e:any) { console.error("[FileMoon] proxy upload failed:", e); return res.status(502).json({ error:e?.message || "FileMoon upload failed", details:e?.cause?.message || String(e), cause:e?.cause?.code || null }); }
+    finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
   });
 
   this.post("/api/filemoon/sync", async (req: any, res: any) => {
     try {
       if (!(await requireAdmin(req, res))) return;
-      const token = String(process.env.FILEMOON_API_TOKEN || "").trim(); if (!token) return res.status(500).json({ error: "FileMoon is not configured. Set FILEMOON_API_TOKEN on Railway." });
+      const account = String(req.body?.filemoon_account || "1").trim() === "2" ? "2" : "1";
+      const token = getFileMoonToken(account); if (!token) return res.status(500).json({ error: `FileMoon Account ${account} is not configured. Set FILEMOON_API_TOKEN_${account} on Railway.` });
       let page = 1; const perPage = 100; const allFiles: any[] = [];
       while (true) {
         const response = await fetch(`https://filemoon.org/api/v1/files?page=${page}&per_page=${perPage}`, { headers: { Authorization:`Bearer ${token}`, Accept:"application/json" }, signal: AbortSignal.timeout(30000) });
@@ -146,7 +137,7 @@ const originalListen = express.application.listen;
         const { error } = await supabaseAdmin!.from("videos").insert({ title, slug, description:"", category_id:null, creator_id:null, visibility:"public", moderation_status:"published", video_url:videoUrl, thumbnail_url:thumbnailUrl, provider:"filemoon", provider_id:providerId });
         if (error) throw error; imported++;
       }
-      return res.json({ success:true, imported, updated, total:allFiles.length });
+      return res.json({ success:true, account, imported, updated, total:allFiles.length });
     } catch (e:any) { console.error("[FileMoon] sync failed:", e); return res.status(500).json({ error:e?.message || "FileMoon sync failed" }); }
   });
 
