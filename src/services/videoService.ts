@@ -42,7 +42,20 @@ export const videoService = {
   },
   async getVideoById(id:string):Promise<Video|null> { try { const r=await api<{video:Video}>(`/api/videos/${encodeURIComponent(id)}`); return r.video || null; } catch(e:any) { if(String(e.message).includes('404'))return null; throw e; } },
   async getRelatedVideos(currentVideoId:string, categoryId?:string, limit=6):Promise<Video[]> { const r=await this.getVideos({categoryId,pageSize:limit+1,sortBy:'trending'}); return r.videos.filter(v=>v.id!==currentVideoId).slice(0,limit); },
-  async createVideo(videoData:Partial<Video>):Promise<Video> { const row:any={...videoData}; delete row.category; delete row.creator; const r=await api<{video:Video}>('/api/videos',{method:'POST',body:JSON.stringify(row)}); return r.video; },
+  async createVideo(videoData:Partial<Video>):Promise<Video> {
+    const row:any={...videoData};
+    delete row.category; delete row.creator;
+    // All upload providers must create a public, published record so the
+    // video is immediately visible in the web app. Legacy upload screens send
+    // is_published=true, while the API list uses moderation_status/visibility.
+    if (row.is_published === true) {
+      row.moderation_status = 'published';
+      row.visibility = 'public';
+      delete row.is_published;
+    }
+    const r=await api<{video:Video}>('/api/videos',{method:'POST',body:JSON.stringify(row)});
+    return r.video;
+  },
   async updateVideo(id:string,updates:Partial<Video>):Promise<Video> { const row:any={...updates}; delete row.category; delete row.creator; const r=await api<{video:Video}>(`/api/videos/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(row)}); return r.video; },
   async deleteVideo(id:string):Promise<boolean> { await api(`/api/videos/${encodeURIComponent(id)}`,{method:'DELETE'}); return true; },
   async recordView(videoId:string):Promise<void> { try { const res=await fetch(`/api/videos/${encodeURIComponent(videoId)}/view`,{method:'POST'}); if(!res.ok)throw new Error(`View API returned ${res.status}`); } catch(e){ console.warn('View record failed:',e); } },
