@@ -32,7 +32,7 @@ export const EditVideoPage: React.FC = () => {
       const [v, cats] = await Promise.all([videoService.getVideoById(id), videoService.getCategories()]);
       if (!v) { showToast({ type: 'error', title: 'Video not found' }); navigate('/dashboard'); return; }
       if (user && v.creator_id !== user.id && !isAdmin) { showToast({ type: 'error', title: 'Unauthorized', message: 'You cannot edit another creator\'s video.' }); navigate('/dashboard'); return; }
-      setVideo(v); setCategories(cats); setTitle(v.title); setDescription(v.description); setCategoryId(v.category_id); setVisibility(v.visibility); setIsAgeRestricted(v.is_age_restricted); setIsLoading(false);
+      setVideo(v); setCategories(cats); setTitle(v.title); setDescription(v.description); setCategoryId(v.category_id); setVisibility(v.visibility); setIsAgeRestricted(v.is_age_restricted); setThumbnailPreview(v.thumbnail_url || ''); setIsLoading(false);
     }
     load();
   }, [id, user, isAdmin, navigate, showToast]);
@@ -53,6 +53,14 @@ export const EditVideoPage: React.FC = () => {
     } catch (err: any) { showToast({ type: 'error', title: 'Thumbnail Upload Failed', message: err.message }); }
     finally { setIsUploadingThumbnail(false); }
   };
+
+  const loadImage = (url: string) => new Promise<boolean>((resolve) => {
+    const image = new Image();
+    const timer = window.setTimeout(() => { image.src = ''; resolve(false); }, 10000);
+    image.onload = () => { window.clearTimeout(timer); resolve(true); };
+    image.onerror = () => { window.clearTimeout(timer); resolve(false); };
+    image.src = url;
+  });
 
   const handleGenerateFileMoonThumbnail = async () => {
     if (!video) return;
@@ -83,15 +91,32 @@ export const EditVideoPage: React.FC = () => {
 
     setIsUploadingThumbnail(true);
     try {
-      // FileMoon exposes generated thumbnails at this public URL pattern.
-      // Do not probe with HEAD: thumbs.filemoon.sx may reject browser CORS requests.
-      const selected = `https://thumbs.filemoon.sx/${encodeURIComponent(fileId)}.jpg`;
-      await videoService.updateVideo(video.id, { thumbnail_url: selected });
-      setVideo({ ...video, thumbnail_url: selected });
+      const candidates = [
+        `https://thumbs.filemoon.sx/${encodeURIComponent(fileId)}.jpg`,
+        `https://thumbs.filemoon.sx/${encodeURIComponent(fileId)}_t.jpg`,
+      ];
+
+      let selected = '';
+      for (let attempt = 0; attempt < 4 && !selected; attempt += 1) {
+        for (const candidate of candidates) {
+          if (await loadImage(candidate)) {
+            selected = candidate;
+            break;
+          }
+        }
+        if (!selected && attempt < 3) await new Promise((resolve) => window.setTimeout(resolve, 2500));
+      }
+
+      if (!selected) {
+        throw new Error('FileMoon has not generated a thumbnail for this video yet. Please wait until the video finishes processing, then try again.');
+      }
+
+      const saved = await videoService.updateVideo(video.id, { thumbnail_url: selected });
+      setVideo(saved || { ...video, thumbnail_url: selected });
       setThumbnailPreview(selected + '?v=' + Date.now());
-      showToast({ type: 'success', title: 'Thumbnail Generated', message: 'FileMoon thumbnail saved.' });
+      showToast({ type: 'success', title: 'Thumbnail Generated', message: 'FileMoon thumbnail verified and saved.' });
     } catch (err: any) {
-      showToast({ type: 'error', title: 'Thumbnail Generation Failed', message: err?.message || 'Could not save the FileMoon thumbnail.' });
+      showToast({ type: 'error', title: 'Thumbnail Generation Failed', message: err?.message || 'Could not load the FileMoon thumbnail.' });
     } finally {
       setIsUploadingThumbnail(false);
     }
@@ -125,8 +150,8 @@ export const EditVideoPage: React.FC = () => {
         <div className="grid grid-cols-2 gap-4"><div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Category</label><select value={categoryId || ''} onChange={(e) => setCategoryId(e.target.value)} className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400">{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Visibility</label><select value={visibility || 'public'} onChange={(e) => setVisibility(e.target.value as any)} className="w-full h-10 px-3 rounded-xl bg-[#0a0a0a] border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"><option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private</option></select></div></div>
         <div className="p-5 rounded-2xl bg-[#0a0a0a] border border-white/10 space-y-4">
           <div><label className="block text-xs font-semibold text-zinc-300 mb-1.5">Thumbnail</label><p className="text-[11px] text-zinc-500">Generate a thumbnail from the FileMoon video or upload your own. JPG, PNG, or WebP up to 10MB.</p></div>
-          <div className="flex flex-col sm:flex-row gap-4 items-start"><div className="w-full sm:w-48 aspect-video rounded-xl overflow-hidden bg-black border border-white/10 flex items-center justify-center">{(thumbnailPreview || video.thumbnail_url) ? <img key={thumbnailPreview || video.thumbnail_url} src={thumbnailPreview || video.thumbnail_url} alt="Current thumbnail" className="w-full h-full object-cover" /> : <div className="text-zinc-600 flex flex-col items-center gap-2"><ImagePlus className="w-7 h-7" /><span className="text-[10px]">No thumbnail</span></div>}</div><div className="flex-1 space-y-2">
-            {hasFileMoonSource && <button type="button" onClick={handleGenerateFileMoonThumbnail} disabled={isUploadingThumbnail} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold hover:bg-amber-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}{isUploadingThumbnail ? 'Generating...' : 'Generate from FileMoon Video'}</button>}
+          <div className="flex flex-col sm:flex-row gap-4 items-start"><div className="w-full sm:w-48 aspect-video rounded-xl overflow-hidden bg-black border border-white/10 flex items-center justify-center">{(thumbnailPreview || video.thumbnail_url) ? <img key={thumbnailPreview || video.thumbnail_url} src={thumbnailPreview || video.thumbnail_url} alt="Current thumbnail" className="w-full h-full object-cover" onError={(e) => { const img = e.currentTarget; if (!img.dataset.fallbackT) { img.dataset.fallbackT = '1'; const current = img.src.split('?')[0]; img.src = current.includes('_t.jpg') ? current : current.replace(/\.jpg$/i, '_t.jpg'); } }} /> : <div className="text-zinc-600 flex flex-col items-center gap-2"><ImagePlus className="w-7 h-7" /><span className="text-[10px]">No thumbnail</span></div>}</div><div className="flex-1 space-y-2">
+            {hasFileMoonSource && <button type="button" onClick={handleGenerateFileMoonThumbnail} disabled={isUploadingThumbnail} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold hover:bg-amber-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">{isUploadingThumbnail ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}{isUploadingThumbnail ? 'Checking FileMoon Thumbnail...' : 'Generate from FileMoon Video'}</button>}
             <input id="video-thumbnail" type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(ev) => { const file = ev.target.files?.[0] || null; setThumbnailFile(file); if (file) setThumbnailPreview(URL.createObjectURL(file)); }} />
             <label htmlFor="video-thumbnail" className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/10 bg-white/5 text-xs font-semibold text-white hover:bg-white/10 cursor-pointer"><ImagePlus className="w-4 h-4" /> Choose Thumbnail</label>
             {thumbnailFile && <p className="text-[11px] text-zinc-400 truncate">{thumbnailFile.name}</p>}
