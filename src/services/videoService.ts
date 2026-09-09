@@ -45,6 +45,13 @@ export const videoService = {
   async createVideo(videoData:Partial<Video>):Promise<Video> {
     const row:any={...videoData};
     delete row.category; delete row.creator;
+    // Older/current Supabase schemas do not guarantee provider/provider_id columns.
+    // Provider identity is already encoded in video_url (FileMoon / Streamtape /
+    // UQLOAD / DoodStream / external embed), so do not send non-schema fields.
+    // This prevents successful provider uploads from failing at the DB insert,
+    // which previously made the uploaded video disappear from the web app.
+    delete row.provider;
+    delete row.provider_id;
     // All upload providers must create a public, published record so the
     // video is immediately visible in the web app. Legacy upload screens send
     // is_published=true, while the API list uses moderation_status/visibility.
@@ -56,7 +63,7 @@ export const videoService = {
     const r=await api<{video:Video}>('/api/videos',{method:'POST',body:JSON.stringify(row)});
     return r.video;
   },
-  async updateVideo(id:string,updates:Partial<Video>):Promise<Video> { const row:any={...updates}; delete row.category; delete row.creator; const r=await api<{video:Video}>(`/api/videos/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(row)}); return r.video; },
+  async updateVideo(id:string,updates:Partial<Video>):Promise<Video> { const row:any={...updates}; delete row.category; delete row.creator; delete row.provider; delete row.provider_id; const r=await api<{video:Video}>(`/api/videos/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(row)}); return r.video; },
   async deleteVideo(id:string):Promise<boolean> { await api(`/api/videos/${encodeURIComponent(id)}`,{method:'DELETE'}); return true; },
   async recordView(videoId:string):Promise<void> { try { const res=await fetch(`/api/videos/${encodeURIComponent(videoId)}/view`,{method:'POST'}); if(!res.ok)throw new Error(`View API returned ${res.status}`); } catch(e){ console.warn('View record failed:',e); } },
   async getCategories():Promise<Category[]> { const r=await api<{categories:Category[]}>('/api/categories'); return r.categories || []; },
