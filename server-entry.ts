@@ -42,22 +42,81 @@ const originalListen = express.application.listen;
   this.post("/api/filemoon/proxy-upload", upload.single("file"), async (req: any, res: any) => {
     let tempPath = "";
     try {
-      if (!(await requireAdmin(req, res))) return; const token = String(process.env.FILEMOON_API_TOKEN || "").trim(); if (!token) return res.status(500).json({ error: "FileMoon is not configured. Set FILEMOON_API_TOKEN on Railway." }); if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
-      tempPath = req.file.path; const fileName = req.file.originalname || "video.mp4"; const mimeType = req.file.mimetype || "application/octet-stream"; const fileSize = Number(req.file.size || 0); const CHUNK_SIZE = 90 * 1024 * 1024; const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE)); const uploadId = crypto.randomUUID();
-      const sendFileMoonRequest = async (chunkIndex: number): Promise<{ statusCode: number; body: string; retryAfter?: number }> => {
-        const start = chunkIndex * CHUNK_SIZE; const end = Math.min(fileSize, start + CHUNK_SIZE); const chunkLength = Math.max(0, end - start); const form = new FormData();
-        form.append("file", fs.createReadStream(tempPath, { start, end: Math.max(start, end - 1) }), { filename: fileName, contentType: mimeType, knownLength: chunkLength }); form.append("visibility", "1");
-        if (totalChunks > 1) { form.append("dzuuid", uploadId); form.append("dzchunkindex", String(chunkIndex)); form.append("dztotalchunkcount", String(totalChunks)); form.append("dzchunksize", String(CHUNK_SIZE)); form.append("dztotalfilesize", String(fileSize)); form.append("dzchunkbyteoffset", String(start)); }
+      if (!(await requireAdmin(req, res))) return;
+      const token = String(process.env.FILEMOON_API_TOKEN || "").trim();
+      if (!token) return res.status(500).json({ error: "FileMoon is not configured. Set FILEMOON_API_TOKEN on Railway." });
+      if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
+      tempPath = req.file.path;
+      const fileName = req.file.originalname || "video.mp4";
+      const mimeType = req.file.mimetype || "application/octet-stream";
+      const fileSize = Number(req.file.size || 0);
+      const CHUNK_SIZE = 90 * 1024 * 1024;
+      const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
+      const uploadId = crypto.randomUUID();
+
+      const sendRequest = async (chunkIndex: number): Promise<{ statusCode:number; body:string; retryAfter?:number; requestId?:string }> => {
+        const start = chunkIndex * CHUNK_SIZE;
+        const endExclusive = Math.min(fileSize, start + CHUNK_SIZE);
+        const chunkLength = Math.max(0, endExclusive - start);
+        const form = new FormData();
+        form.append("file", fs.createReadStream(tempPath, { start, end: Math.max(start, endExclusive - 1) }), { filename: fileName, contentType: mimeType, knownLength: chunkLength });
+        form.append("visibility", "1");
+        if (totalChunks > 1) {
+          form.append("dzuuid", uploadId);
+          form.append("dzchunkindex", String(chunkIndex));
+          form.append("dztotalchunkcount", String(totalChunks));
+          form.append("dzchunksize", String(CHUNK_SIZE));
+          form.append("dztotalfilesize", String(fileSize));
+          form.append("dzchunkbyteoffset", String(start));
+        }
         const length = await new Promise<number>((resolve, reject) => form.getLength((err, n) => err ? reject(err) : resolve(n)));
-        return new Promise<{ statusCode: number; body: string; retryAfter?: number }>((resolve, reject) => { const request = https.request({ protocol: "https:", hostname: "filemoon.org", path: "/api/v1/files/upload", method: "POST", headers: { ...form.getHeaders(), Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Length": String(length) }, timeout: 30 * 60 * 1000 }, (response: any) => { let body = ""; response.setEncoding("utf8"); response.on("data", (part: string) => { body += part; }); response.on("end", () => { const retryHeader = response.headers?.["retry-after"]; const retryAfter = Number(Array.isArray(retryHeader) ? retryHeader[0] : retryHeader); resolve({ statusCode: Number(response.statusCode || 0), body, retryAfter: Number.isFinite(retryAfter) ? retryAfter : undefined }); }); response.on("error", reject); }); request.on("timeout", () => request.destroy(new Error("FileMoon upload timed out"))); request.on("error", reject); form.pipe(request); });
+        return new Promise((resolve, reject) => {
+          const request = https.request({
+            protocol: "https:", hostname: "filemoon.org", path: "/api/v1/files/upload", method: "POST",
+            headers: { ...form.getHeaders(), Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Length": String(length), "User-Agent": "CornMM-FileMoon/1.0" },
+            timeout: 30 * 60 * 1000,
+          }, (response: any) => {
+            let body = ""; response.setEncoding("utf8"); response.on("data", (part: string) => { body += part; }); response.on("end", () => {
+              const retryHeader = response.headers?.["retry-after"];
+              const requestIdHeader = response.headers?.["x-request-id"];
+              resolve({ statusCode:Number(response.statusCode || 0), body, retryAfter:Number.isFinite(Number(retryHeader)) ? Number(retryHeader) : undefined, requestId:Array.isArray(requestIdHeader) ? requestIdHeader[0] : requestIdHeader });
+            }); response.on("error", reject);
+          });
+          request.on("timeout", () => request.destroy(new Error("FileMoon upload timed out")));
+          request.on("error", reject);
+          form.pipe(request);
+        });
       };
-      let finalResponse: { statusCode: number; body: string } | null = null;
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) { let upstream = await sendFileMoonRequest(chunkIndex); if (upstream.statusCode === 429) { const waitSeconds = Math.min(Math.max(upstream.retryAfter || 5, 1), 120); await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000)); upstream = await sendFileMoonRequest(chunkIndex); } console.log(`[FileMoon] upload chunk ${chunkIndex + 1}/${totalChunks} HTTP ${upstream.statusCode}: ${upstream.body.slice(0, 3000)}`); let data: any = {}; try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; } if (upstream.statusCode < 200 || upstream.statusCode >= 300) return res.status(502).json({ error: String(data?.error?.message || data?.error || data?.message || "FileMoon upload failed"), upstreamStatus: upstream.statusCode, chunk: chunkIndex, totalChunks, requestId: data?.request_id || null, details: data }); finalResponse = { statusCode: upstream.statusCode, body: upstream.body }; }
-      if (!finalResponse) return res.status(502).json({ error: "FileMoon upload did not return a response" }); let data: any = {}; try { data = JSON.parse(finalResponse.body); } catch { data = { raw: finalResponse.body }; }
-      const file = data?.data || data?.file || data || {}; const fileId = String(file?.id || file?.file_id || data?.id || data?.file_id || findValue(data, ["id", "file_id"]) || "").trim(); if (!fileId) return res.status(502).json({ error: "FileMoon did not return a file ID", details: data });
-      const embedUrl = String(file?.urls?.embed || data?.urls?.embed || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`); const watchUrl = String(file?.urls?.watch || data?.urls?.watch || `https://filemoon.org/${encodeURIComponent(fileId)}/watch`); const thumbnailUrl = String(file?.thumbnail_url || file?.thumbnail || data?.thumbnail_url || data?.thumbnail || "");
-      return res.json({ success: true, provider: "filemoon", fileId, providerId: fileId, embedUrl, videoUrl: embedUrl || watchUrl, thumbnailUrl });
-    } catch (e: any) { console.error("[FileMoon] proxy upload failed:", e); return res.status(502).json({ error: e?.message || "FileMoon upload failed", details: e?.cause?.message || String(e), cause: e?.cause?.code || null }); } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
+
+      let finalResponse: any = null;
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        let upstream = await sendRequest(chunkIndex);
+        if (upstream.statusCode === 429) {
+          const waitSeconds = Math.min(Math.max(upstream.retryAfter || 5, 1), 120);
+          await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+          upstream = await sendRequest(chunkIndex);
+        }
+        console.log(`[FileMoon] upload chunk ${chunkIndex + 1}/${totalChunks} HTTP ${upstream.statusCode} requestId=${upstream.requestId || "-"}: ${upstream.body.slice(0, 3000)}`);
+        let data:any = {}; try { data = JSON.parse(upstream.body); } catch { data = { raw:upstream.body }; }
+        if (upstream.statusCode < 200 || upstream.statusCode >= 300) {
+          const upstreamMessage = String(data?.error?.message || data?.error || data?.message || "FileMoon upload failed");
+          return res.status(502).json({ error:`FileMoon upload failed: ${upstreamMessage}`, upstreamStatus:upstream.statusCode, chunk:chunkIndex, totalChunks, requestId:data?.request_id || upstream.requestId || null, details:data });
+        }
+        finalResponse = { statusCode:upstream.statusCode, body:upstream.body };
+      }
+      if (!finalResponse) return res.status(502).json({ error:"FileMoon upload did not return a response" });
+      let data:any = {}; try { data = JSON.parse(finalResponse.body); } catch { data = { raw:finalResponse.body }; }
+      const file = data?.data || data?.file || data || {};
+      const fileId = String(file?.id || file?.file_id || data?.id || data?.file_id || findValue(data,["id","file_id"]) || "").trim();
+      if (!fileId) return res.status(502).json({ error:"FileMoon did not return a file ID", details:data });
+      const embedUrl = String(file?.urls?.embed || data?.urls?.embed || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`);
+      const watchUrl = String(file?.urls?.watch || data?.urls?.watch || `https://filemoon.org/${encodeURIComponent(fileId)}/watch`);
+      const thumbnailUrl = String(file?.thumbnail_url || file?.thumbnail || data?.thumbnail_url || data?.thumbnail || "");
+      return res.json({ success:true, provider:"filemoon", fileId, providerId:fileId, embedUrl, videoUrl:embedUrl || watchUrl, thumbnailUrl });
+    } catch (e:any) {
+      console.error("[FileMoon] proxy upload failed:", e);
+      return res.status(502).json({ error:e?.message || "FileMoon upload failed", details:e?.cause?.message || String(e), cause:e?.cause?.code || null });
+    } finally { if (tempPath) { try { fs.unlinkSync(tempPath); } catch {} } }
   });
 
   this.post("/api/filemoon/sync", async (req: any, res: any) => {
@@ -78,10 +137,10 @@ const originalListen = express.application.listen;
         const title = String(file?.name || file?.filename || `FileMoon ${providerId}`).trim();
         const videoUrl = String(file?.urls?.embed || `https://filemoon.org/${encodeURIComponent(providerId)}/embed`); const thumbnailUrl = String(file?.thumbnail_url || file?.thumbnail || "");
         const { data: existing } = await supabaseAdmin!.from("videos").select("id").eq("provider","filemoon").eq("provider_id",providerId).maybeSingle();
-        if (existing?.id) { const { error } = await supabaseAdmin!.from("videos").update({ title, video_url:videoUrl, thumbnail_url:thumbnailUrl, visibility:"public", moderation_status:"published", is_published:true, updated_at:new Date().toISOString() }).eq("id",existing.id); if (error) throw error; updated++; continue; }
+        if (existing?.id) { const { error } = await supabaseAdmin!.from("videos").update({ title, video_url:videoUrl, thumbnail_url:thumbnailUrl, visibility:"public", moderation_status:"published", updated_at:new Date().toISOString() }).eq("id",existing.id); if (error) throw error; updated++; continue; }
         const baseSlug = title.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"") || "filemoon-video";
         const slug = `${baseSlug}-${providerId.toLowerCase()}`;
-        const { error } = await supabaseAdmin!.from("videos").insert({ title, slug, description:"", category_id:null, creator_id:null, visibility:"public", moderation_status:"published", video_url:videoUrl, thumbnail_url:thumbnailUrl, provider:"filemoon", provider_id:providerId, is_published:true });
+        const { error } = await supabaseAdmin!.from("videos").insert({ title, slug, description:"", category_id:null, creator_id:null, visibility:"public", moderation_status:"published", video_url:videoUrl, thumbnail_url:thumbnailUrl, provider:"filemoon", provider_id:providerId });
         if (error) throw error; imported++;
       }
       return res.json({ success:true, imported, updated, total:allFiles.length });
