@@ -65,7 +65,7 @@ export const VideoPlayer:React.FC<VideoPlayerProps>=({video,onProgress,onComplet
   const m=src?.match(/src\s*=\s*["'](.*?)["']/i);if(m?.[1])src=m[1];
   return <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black shadow-2xl border border-white/10">
    {!hasStarted&&<button aria-label="Play video" onClick={()=>setHasStarted(true)} className="absolute inset-0 z-10 flex items-center justify-center overflow-hidden"><img src={video.thumbnail_url} alt="" loading="eager" decoding="async" className="absolute inset-0 w-full h-full object-cover blur-2xl scale-110"/><span className="absolute inset-0 bg-black/40"/><span className="z-20 w-16 h-16 rounded-full bg-white/10 border border-white/20 text-white flex items-center justify-center"><Play className="w-8 h-8 fill-current ml-1"/></span></button>}
-   {hasStarted&&<iframe src={src} title={video.title} loading="lazy" className="w-full h-full border-0" allowFullScreen allow="autoplay; fullscreen; picture-in-picture" referrerPolicy="strict-origin-when-cross-origin"/>}
+   {hasStarted&&<iframe src={src} title={video.title} loading="lazy" className="w-full h-full border-0" allow="autoplay; picture-in-picture" referrerPolicy="strict-origin-when-cross-origin"/>}
   </div>
  }
 
