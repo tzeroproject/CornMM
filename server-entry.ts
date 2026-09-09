@@ -3,6 +3,7 @@ import multer from "multer";
 import FormData from "form-data";
 import fs from "fs";
 import https from "https";
+import crypto from "crypto";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 
@@ -129,7 +130,6 @@ const originalListen = express.application.listen;
       if (!token) return res.status(500).json({ error: "FileMoon is not configured. Set FILEMOON_API_TOKEN on Railway." });
       if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
       tempPath = req.file.path;
-
       const fileSize = Number(req.file.size || 0);
       const fileName = req.file.originalname || "video.mp4";
       const mimeType = req.file.mimetype || "application/octet-stream";
@@ -149,7 +149,6 @@ const originalListen = express.application.listen;
           stream.on("end", () => resolve(Buffer.concat(parts)));
           stream.on("error", reject);
         });
-
         const form = new FormData();
         form.append("file", chunk, { filename: fileName, contentType: mimeType, knownLength: chunkLength });
         form.append("visibility", "1");
@@ -161,7 +160,6 @@ const originalListen = express.application.listen;
           form.append("dztotalfilesize", String(fileSize));
           form.append("dzchunkbyteoffset", String(start));
         }
-
         const length = await new Promise<number>((resolve, reject) => form.getLength((err, n) => err ? reject(err) : resolve(n)));
         const upstream = await new Promise<{statusCode:number, body:string}>((resolve, reject) => {
           form.submit({ protocol: "https:", host: "filemoon.org", path: "/api/v1/files/upload", headers: { ...form.getHeaders(), Authorization: `Bearer ${token}`, Accept: "application/json", "Content-Length": String(length) } }, (error: any, response: any) => {
@@ -172,7 +170,6 @@ const originalListen = express.application.listen;
             response.on("error", reject);
           });
         });
-
         let data: any = {};
         try { data = JSON.parse(upstream.body); } catch { data = { raw: upstream.body }; }
         console.log(`[FileMoon] chunk ${chunkIndex + 1}/${totalChunks} upstream HTTP ${upstream.statusCode}: ${upstream.body.slice(0, 2000)}`);
