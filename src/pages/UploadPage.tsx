@@ -4,18 +4,12 @@ import { useAuth } from '../context/AuthContext';
 import { videoService } from '../services/videoService';
 import type { Category } from '../types';
 
-type UploadMode = 'uqload' | 'doodstream' | 'filemoon' | 'streamtape';
+type UploadMode = 'uqload' | 'doodstream' | 'filemoon' | 'streamtape' | 'embed';
 
 const getEmbedSource = (value: string) => {
   const trimmed = value.trim();
   const iframeMatch = trimmed.match(/<iframe[^>]+src=["']([^"']+)["']/i);
   return iframeMatch?.[1] || trimmed;
-};
-
-const extractUqloadFileCode = (value: string) => {
-  const source = getEmbedSource(value);
-  const match = source.match(/uqload\.vc\/(?:e\/)?([a-zA-Z0-9]+)(?:\.html)?/i);
-  return match?.[1] || null;
 };
 
 const extractUqloadFile = (payload: any) => {
@@ -26,12 +20,6 @@ const extractUqloadFile = (payload: any) => {
   };
 };
 
-const extractStreamtapeId = (value: string) => {
-  const source = getEmbedSource(value);
-  const match = source.match(/streamtape\.com\/(?:e|v)\/([^/?#"']+)/i);
-  return match?.[1] || null;
-};
-
 export default function UploadPage() {
   const { user, isAdmin } = useAuth();
   const [uploadMode, setUploadMode] = useState<UploadMode>('uqload');
@@ -40,6 +28,7 @@ export default function UploadPage() {
   const [categoryId, setCategoryId] = useState('');
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [embedInput, setEmbedInput] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState('');
@@ -90,38 +79,48 @@ export default function UploadPage() {
     if (!user) { setError('Please sign in before uploading a video.'); return; }
     if (!isAdmin) { setError('Admin access required for video uploads.'); return; }
     if (!title.trim()) { setError('Please enter a title.'); return; }
-    if (!selectedFile) { setError('Please select a video file.'); return; }
+
+    const isAnyEmbed = uploadMode === 'embed';
+    if (isAnyEmbed) {
+      if (!embedInput.trim()) { setError('Please enter an embed URL or iframe code.'); return; }
+    } else if (!selectedFile) {
+      setError('Please select a video file.'); return;
+    }
+
     try {
       setIsUploading(true);
       const session = await import('../lib/supabase').then(({ supabase }) => supabase.auth.getSession());
       const token = session.data.session?.access_token;
       if (!token) throw new Error('Your session has expired. Please sign in again.');
 
-      let result: any;
       let providerId = '';
       let videoUrl = '';
       let thumbnailUrl = '';
 
-      if (uploadMode === 'streamtape') {
-        result = await uploadMultipart('/api/streamtape/proxy-upload', token, 'Streamtape');
+      if (isAnyEmbed) {
+        videoUrl = getEmbedSource(embedInput);
+        providerId = videoUrl;
+        thumbnailUrl = '';
+      } else if (uploadMode === 'streamtape') {
+        const result = await uploadMultipart('/api/streamtape/proxy-upload', token, 'Streamtape');
         providerId = String(result.fileId || result.providerId || '');
         if (!providerId) throw new Error('Streamtape did not return a file ID.');
         videoUrl = String(result.embedUrl || `https://streamtape.com/e/${encodeURIComponent(providerId)}`);
         thumbnailUrl = String(result.thumbnailUrl || '');
       } else if (uploadMode === 'filemoon') {
-        result = await uploadMultipart('/api/filemoon/proxy-upload', token, 'FileMoon');
+        const result = await uploadMultipart('/api/filemoon/proxy-upload', token, 'FileMoon');
         providerId = String(result.fileId || result.providerId || '');
         if (!providerId) throw new Error('FileMoon did not return a file ID.');
         videoUrl = String(result.embedUrl || result.videoUrl || `https://filemoon.org/${encodeURIComponent(providerId)}/embed`);
         thumbnailUrl = String(result.thumbnailUrl || '');
       } else if (uploadMode === 'doodstream') {
-        result = await uploadMultipart('/api/doodstream/proxy-upload', token, 'DoodStream');
+        const result = await uploadMultipart('/api/doodstream/proxy-upload', token, 'DoodStream');
         providerId = String(result.fileCode || result.providerId || '');
         if (!providerId) throw new Error('DoodStream did not return a file code.');
         videoUrl = String(result.embedUrl || result.videoUrl || `https://dood.to/e/${encodeURIComponent(providerId)}`);
         thumbnailUrl = String(result.thumbnailUrl || '');
       } else {
-        result = await uploadMultipart('/api/uqload/proxy-upload', token, 'UQLOAD');
+        const result = await uploadMultipart('/api/uqload/proxy-upload', token, 'UQLOAD');
         const extracted = extractUqloadFile(result);
         providerId = String(extracted.fileCode || '');
         if (!providerId) throw new Error('UQLOAD did not return a file code.');
@@ -145,19 +144,25 @@ export default function UploadPage() {
 
       const localEmbed = `${window.location.origin}/embed/${created.id}`;
       setEmbedLink(localEmbed);
-      setSuccess(`${uploadMode === 'streamtape' ? 'Streamtape' : uploadMode === 'filemoon' ? 'FileMoon' : uploadMode === 'doodstream' ? 'DoodStream' : 'UQLOAD'} upload completed successfully.`);
-      setTitle(''); setDescription(''); setCategoryId(''); setSelectedFile(null);
+      setSuccess(isAnyEmbed ? 'External embed link added successfully.' : `${uploadMode === 'streamtape' ? 'Streamtape' : uploadMode === 'filemoon' ? 'FileMoon' : uploadMode === 'doodstream' ? 'DoodStream' : 'UQLOAD'} upload completed successfully.`);
+      setTitle(''); setDescription(''); setCategoryId(''); setSelectedFile(null); setEmbedInput('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed.');
     } finally { setIsUploading(false); }
   };
+
+  const resetMode = (mode: UploadMode) => {
+    setUploadMode(mode); setError(''); setSuccess(''); setEmbedLink(''); setSelectedFile(null); setEmbedInput('');
+  };
+
+  const providerLabel = uploadMode === 'streamtape' ? 'Streamtape' : uploadMode === 'filemoon' ? 'FileMoon' : uploadMode === 'doodstream' ? 'DoodStream' : uploadMode === 'uqload' ? 'UQLOAD' : 'Any Embed Link';
 
   return (
     <div className="min-h-screen bg-black text-white p-6 md:p-10">
       <div className="max-w-3xl mx-auto space-y-6">
         <div><h1 className="text-3xl font-black">Upload Video</h1><p className="text-sm text-zinc-400 mt-1">Admin-only video upload providers.</p></div>
         <div className="flex flex-wrap bg-[#0a0a0a] border border-white/10 rounded-xl p-1">
-          {(['uqload', 'doodstream', 'filemoon', 'streamtape'] as UploadMode[]).map((mode) => <button key={mode} type="button" onClick={() => { setUploadMode(mode); setError(''); setSuccess(''); setEmbedLink(''); }} className={`flex-1 min-w-[130px] py-2 text-sm font-semibold rounded-lg transition-colors ${uploadMode === mode ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-400 hover:text-white'}`}>{mode === 'uqload' ? 'UQLOAD' : mode === 'doodstream' ? 'DoodStream' : mode === 'filemoon' ? 'FileMoon' : 'Streamtape'}</button>)}
+          {(['uqload', 'doodstream', 'filemoon', 'streamtape', 'embed'] as UploadMode[]).map((mode) => <button key={mode} type="button" onClick={() => resetMode(mode)} className={`flex-1 min-w-[130px] py-2 text-sm font-semibold rounded-lg transition-colors ${uploadMode === mode ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-400 hover:text-white'}`}>{mode === 'uqload' ? 'UQLOAD' : mode === 'doodstream' ? 'DoodStream' : mode === 'filemoon' ? 'FileMoon' : mode === 'streamtape' ? 'Streamtape' : 'Any Embed Link'}</button>)}
         </div>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4">
@@ -165,11 +170,21 @@ export default function UploadPage() {
             <div><label className="block text-sm font-bold text-white mb-2">Description</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} className="w-full h-24 px-4 py-3 rounded-xl bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50" placeholder="Optional description" /></div>
             <div><label className="block text-sm font-bold text-white mb-2">Category</label><select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50"><option value="">No category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></div>
           </div>
-          {!selectedFile ? <div onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} className={`border border-dashed rounded-3xl p-10 text-center cursor-pointer transition-all ${isDragging ? 'border-amber-400 bg-amber-500/10' : 'border-white/10 hover:border-white/20 bg-[#0a0a0a]'}`}><input ref={fileInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={(e) => handleFileSelect(e.target.files?.[0])} className="hidden" /><div className="w-16 h-16 rounded-2xl bg-[#141414] border border-white/10 text-amber-400 flex items-center justify-center mx-auto mb-4"><Upload className="w-8 h-8" /></div><h3 className="font-bold text-base text-white">Select or drag a video file here</h3><p className="text-xs text-zinc-400 mt-1">MP4, WebM, MOV, or MKV up to 1GB</p><div className="mt-4 inline-flex items-center px-3 py-1 rounded-full bg-[#161616] border border-white/10 text-[11px] text-zinc-300">{uploadMode === 'streamtape' ? 'Streamtape API • Admin only' : `${uploadMode === 'filemoon' ? 'FileMoon' : uploadMode === 'doodstream' ? 'DoodStream' : 'UQLOAD'} API • Admin only`}</div></div> : <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 flex items-center justify-between gap-4"><div className="min-w-0"><p className="font-semibold truncate">{selectedFile.name}</p><p className="text-xs text-zinc-500">{(selectedFile.size / 1024 / 1024).toFixed(1)} MB</p></div><button type="button" onClick={() => setSelectedFile(null)} className="p-2 rounded-lg hover:bg-white/10" aria-label="Remove file"><X className="w-5 h-5" /></button></div>}
+          {uploadMode === 'embed' ? (
+            <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-3">
+              <label className="block text-sm font-bold text-white">Any Embed Link</label>
+              <p className="text-xs text-zinc-400">Paste an external iframe embed URL or full iframe code. It will use its own isolated embed player.</p>
+              <textarea value={embedInput} onChange={(e) => setEmbedInput(e.target.value)} className="w-full h-28 px-4 py-3 rounded-xl bg-black border border-white/10 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50" placeholder="https://example.com/embed/abc123 or <iframe src=\"...\"></iframe>" />
+            </div>
+          ) : !selectedFile ? (
+            <div onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }} onDragLeave={() => setIsDragging(false)} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} className={`border border-dashed rounded-3xl p-10 text-center cursor-pointer transition-all ${isDragging ? 'border-amber-400 bg-amber-500/10' : 'border-white/10 hover:border-white/20 bg-[#0a0a0a]'}`}><input ref={fileInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" onChange={(e) => handleFileSelect(e.target.files?.[0])} className="hidden" /><div className="w-16 h-16 rounded-2xl bg-[#141414] border border-white/10 text-amber-400 flex items-center justify-center mx-auto mb-4"><Upload className="w-8 h-8" /></div><h3 className="font-bold text-base text-white">Select or drag a video file here</h3><p className="text-xs text-zinc-400 mt-1">MP4, WebM, MOV, or MKV up to 1GB</p><div className="mt-4 inline-flex items-center px-3 py-1 rounded-full bg-[#161616] border border-white/10 text-[11px] text-zinc-300">{providerLabel} API • Admin only</div></div>
+          ) : (
+            <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 flex items-center justify-between gap-4"><div className="min-w-0"><p className="font-semibold truncate">{selectedFile.name}</p><p className="text-xs text-zinc-500">{(selectedFile.size / 1024 / 1024).toFixed(1)} MB</p></div><button type="button" onClick={() => setSelectedFile(null)} className="p-2 rounded-lg hover:bg-white/10" aria-label="Remove file"><X className="w-5 h-5" /></button></div>
+          )}
           {error && <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-300 break-words">{error}</div>}
           {success && <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-sm text-emerald-300">{success}</div>}
           {embedLink && <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20"><p className="text-xs text-amber-300 mb-2">Unique CornMM Embed Link</p><div className="flex gap-2"><input readOnly value={embedLink} className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-black border border-white/10 text-xs text-white" /><button type="button" onClick={() => navigator.clipboard?.writeText(embedLink)} className="px-3 py-2 rounded-lg bg-amber-500 text-black text-xs font-bold">Copy</button></div></div>}
-          <button type="submit" disabled={isUploading} className="w-full py-4 rounded-2xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">{isUploading ? <><Loader2 className="w-5 h-5 animate-spin" /> Uploading...</> : <><LinkIcon className="w-5 h-5" /> Upload {uploadMode === 'streamtape' ? 'to Streamtape' : uploadMode === 'filemoon' ? 'to FileMoon' : uploadMode === 'doodstream' ? 'to DoodStream' : 'to UQLOAD'}</>}</button>
+          <button type="submit" disabled={isUploading} className="w-full py-4 rounded-2xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">{isUploading ? <><Loader2 className="w-5 h-5 animate-spin" /> Saving...</> : <><LinkIcon className="w-5 h-5" /> {uploadMode === 'embed' ? 'Add Embed Link' : `Upload to ${providerLabel}`}</>}</button>
         </form>
       </div>
     </div>
