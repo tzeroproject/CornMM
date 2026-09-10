@@ -21,7 +21,14 @@ export default function FileMoonUploadPage() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { videoService.getCategories().then(setCategories).catch(() => setCategories([])); }, []);
-  const selectFile = (value?: File) => { setError(''); setSuccess(''); setEmbedLink(''); setCopied(false); if (!value) return; if (!value.type.startsWith('video/')) return setError('Please select a valid video file.'); if (value.size > 1024 * 1024 * 1024) return setError('Video file must be 1GB or smaller.'); setFile(value); };
+
+  const selectFile = (value?: File) => {
+    setError(''); setSuccess(''); setEmbedLink(''); setCopied(false);
+    if (!value) return;
+    if (!value.type.startsWith('video/')) return setError('Please select a valid video file.');
+    if (value.size > 1024 * 1024 * 1024) return setError('Video file must be 1GB or smaller.');
+    setFile(value);
+  };
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setError(''); setSuccess(''); setEmbedLink(''); setCopied(false);
@@ -29,19 +36,58 @@ export default function FileMoonUploadPage() {
     if (!isAdmin) return setError('Admin access required for FileMoon uploads.');
     if (!title.trim()) return setError('Please enter a title.');
     if (!file) return setError('Please select a video file.');
+
     try {
       setUploading(true);
-      const session = await supabase.auth.getSession(); const token = session.data.session?.access_token; if (!token) throw new Error('Your session has expired. Please sign in again.');
-      const form = new FormData(); form.append('file', file); form.append('title', title.trim());
-      const result = await new Promise<any>((resolve, reject) => { const xhr = new XMLHttpRequest(); xhr.open('POST', '/api/filemoon/proxy-upload'); xhr.setRequestHeader('Authorization', 'Bearer ' + token); xhr.upload.onprogress = e => { if (e.lengthComputable) setProgress(Math.round(e.loaded / e.total * 100)); }; xhr.onload = () => { let data:any={}; try{data=JSON.parse(xhr.responseText||'{}')}catch{} if(xhr.status>=200&&xhr.status<300)return resolve(data); const parts=[data?.error||`FileMoon upload failed (${xhr.status}).`]; if(data?.upstreamStatus)parts.push(`Upstream HTTP ${data.upstreamStatus}`); if(data?.requestId)parts.push(`Request ID ${data.requestId}`); const detail=data?.details?.error?.message; if(detail&&detail!==data?.error)parts.push(detail); reject(new Error(parts.join(' — '))); }; xhr.onerror=()=>reject(new Error('Network error while uploading to FileMoon.')); xhr.send(form); });
-      const fileId=String(result.fileId||result.providerId||''); if(!fileId) throw new Error('FileMoon did not return a file ID.');
-      const providerUrl=String(result.embedUrl||result.videoUrl||('https://filemoon.org/'+encodeURIComponent(fileId)+'/embed'));
-      const created=await videoService.createVideo({title:title.trim(),description:description.trim(),category_id:categoryId||undefined,creator_id:user.id,video_url:providerUrl,thumbnail_url:result.thumbnailUrl||'',preview_animation_url:'',provider:'filemoon',provider_id:fileId,is_published:true});
-      if(!created?.id) throw new Error('FileMoon upload succeeded, but the Webapp video record was not created.');
-      setEmbedLink(`${window.location.origin}/embed/${encodeURIComponent(created.id)}`); setSuccess('FileMoon upload + Webapp save completed successfully.'); setTitle(''); setDescription(''); setCategoryId(''); setFile(null); setProgress(0);
-    } catch(e){setError(e instanceof Error?e.message:'Upload failed.');} finally{setUploading(false);}
-  };
-  const copyLink=async()=>{if(!embedLink)return;try{await navigator.clipboard.writeText(embedLink);setCopied(true);setTimeout(()=>setCopied(false),1500)}catch{setError('Could not copy the embed link.')}};
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token;
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
 
-  return <div className="min-h-screen bg-black text-white p-6 md:p-10"><div className="max-w-3xl mx-auto space-y-6"><div><h1 className="text-3xl font-black">FileMoon Upload</h1><p className="text-sm text-zinc-400 mt-1">Every upload gets its own CornMM embed URL and its own provider player.</p></div><form onSubmit={submit} className="space-y-6"><div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4"><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Video title" className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white"/><textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Optional description" className="w-full h-24 px-4 py-3 rounded-xl bg-black border border-white/10 text-white"/><select value={categoryId} onChange={e=>setCategoryId(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white"><option value="">No category</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div onClick={()=>inputRef.current?.click()} className="border border-dashed border-white/10 rounded-3xl p-10 text-center cursor-pointer bg-[#0a0a0a] hover:border-white/20"><input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" className="hidden" onChange={e=>selectFile(e.target.files?.[0])}/><Upload className="w-10 h-10 text-amber-400 mx-auto mb-3"/><h3 className="font-bold">{file?file.name:'Select a video file'}</h3><p className="text-xs text-zinc-400 mt-1">MP4, WebM, MOV, or MKV up to 1GB</p></div>{uploading&&<div className="text-sm text-zinc-300">Uploading to FileMoon... {progress}%</div>}{error&&<div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm break-words">{error}</div>}{success&&<div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">{success}</div>}{embedLink&&<div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-3"><div className="text-xs text-amber-300 font-bold">Unique CornMM Embed Link</div><div className="flex gap-2"><input readOnly value={embedLink} className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-black border border-white/10 text-white text-sm"/><button type="button" onClick={copyLink} className="px-3 py-2 rounded-lg bg-amber-500 text-black font-bold">{copied?<Check className="w-4 h-4"/>:<Copy className="w-4 h-4"/>}</button></div></div>}<button disabled={uploading} className="w-full py-3 rounded-xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">{uploading&&<Loader2 className="w-4 h-4 animate-spin"/>}{uploading?'Uploading...':'Upload to FileMoon'}</button></form></div></div>;
+      const form = new FormData();
+      form.append('file', file);
+      form.append('title', title.trim());
+      form.append('description', description.trim());
+      if (categoryId) form.append('category_id', categoryId);
+      form.append('filemoon_account', '1');
+
+      const result = await new Promise<any>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/filemoon/proxy-upload');
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+        xhr.upload.onprogress = e => { if (e.lengthComputable) setProgress(Math.round(e.loaded / e.total * 100)); };
+        xhr.onload = () => {
+          let data: any = {};
+          try { data = JSON.parse(xhr.responseText || '{}'); } catch {}
+          if (xhr.status >= 200 && xhr.status < 300) return resolve(data);
+          const parts = [data?.error || `FileMoon upload failed (${xhr.status}).`];
+          if (data?.upstreamStatus) parts.push(`Upstream HTTP ${data.upstreamStatus}`);
+          if (data?.requestId) parts.push(`Request ID ${data.requestId}`);
+          const detail = data?.details?.error?.message;
+          if (detail && detail !== data?.error) parts.push(detail);
+          reject(new Error(parts.join(' — ')));
+        };
+        xhr.onerror = () => reject(new Error('Network error while uploading to FileMoon.'));
+        xhr.send(form);
+      });
+
+      const fileId = String(result.fileId || result.providerId || '');
+      if (!fileId) throw new Error('FileMoon did not return a file ID.');
+      if (!result.savedToSupabase || !result.videoId) throw new Error('FileMoon upload succeeded, but the Webapp video record was not saved.');
+
+      const embedUrl = String(result.embedUrl || result.videoUrl || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`);
+      setEmbedLink(`${window.location.origin}/embed/${encodeURIComponent(result.videoId)}`);
+      setSuccess('FileMoon upload + Supabase + Webapp save completed successfully.');
+      setTitle(''); setDescription(''); setCategoryId(''); setFile(null); setProgress(0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed.');
+    } finally { setUploading(false); }
+  };
+
+  const copyLink = async () => {
+    if (!embedLink) return;
+    try { await navigator.clipboard.writeText(embedLink); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { setError('Could not copy the embed link.'); }
+  };
+
+  return <div className="min-h-screen bg-black text-white p-6 md:p-10"><div className="max-w-3xl mx-auto space-y-6"><div><h1 className="text-3xl font-black">FileMoon Upload</h1><p className="text-sm text-zinc-400 mt-1">Upload once: FileMoon stores the video and CornMM automatically saves the Webapp record in Supabase.</p></div><form onSubmit={submit} className="space-y-6"><div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4"><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Video title" className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white"/><textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Optional description" className="w-full h-24 px-4 py-3 rounded-xl bg-black border border-white/10 text-white"/><select value={categoryId} onChange={e=>setCategoryId(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white"><option value="">No category</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div onClick={()=>inputRef.current?.click()} className="border border-dashed border-white/10 rounded-3xl p-10 text-center cursor-pointer bg-[#0a0a0a] hover:border-white/20"><input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" className="hidden" onChange={e=>selectFile(e.target.files?.[0])}/><Upload className="w-10 h-10 text-amber-400 mx-auto mb-3"/><h3 className="font-bold">{file?file.name:'Select a video file'}</h3><p className="text-xs text-zinc-400 mt-1">MP4, WebM, MOV, or MKV up to 1GB</p></div>{uploading&&<div className="text-sm text-zinc-300">Uploading to FileMoon... {progress}%</div>}{error&&<div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm break-words">{error}</div>}{success&&<div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">{success}</div>}{embedLink&&<div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-3"><div className="text-xs text-amber-300 font-bold">Unique CornMM Embed Link</div><div className="flex gap-2"><input readOnly value={embedLink} className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-black border border-white/10 text-white text-sm"/><button type="button" onClick={copyLink} className="px-3 py-2 rounded-lg bg-amber-500 text-black font-bold">{copied?<Check className="w-4 h-4"/>:<Copy className="w-4 h-4"/>}</button></div></div>}<button disabled={uploading} className="w-full py-3 rounded-xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">{uploading&&<Loader2 className="w-4 h-4 animate-spin"/>}{uploading?'Uploading...':'Upload to FileMoon'}</button></form></div></div>;
 }
