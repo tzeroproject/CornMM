@@ -19,7 +19,9 @@ async function requireAdmin(req: any, res: any): Promise<boolean> { if (!supabas
 async function getAuthenticatedUser(req: any): Promise<any | null> { if (!supabaseAdmin) return null; const token = bearerToken(req); if (!token) return null; const { data } = await supabaseAdmin.auth.getUser(token); return data?.user || null; }
 function findValue(value: any, keys: string[]): any { if (!value || typeof value !== "object") return null; for (const key of keys) if (value[key] !== undefined && value[key] !== null && String(value[key]).trim()) return value[key]; for (const child of Array.isArray(value) ? value : Object.values(value)) { const found = findValue(child, keys); if (found !== null) return found; } return null; }
 function makeSlug(title: string, providerId: string): string { const base = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "filemoon-video"; return `${base}-${providerId.toLowerCase()}`; }
-function getFileMoonToken(account: string): string { const normalized = String(account || "1").trim() === "2" ? "2" : "1"; return String(process.env[`FILEMOON_API_TOKEN_${normalized}`] || (normalized === "1" ? process.env.FILEMOON_API_TOKEN : "") || "").trim(); }
+const FILEMOON_ACCOUNTS = Array.from({ length: 10 }, (_, index) => String(index + 1));
+function normalizeFileMoonAccount(account: string): string { const value = String(account || "1").trim(); return FILEMOON_ACCOUNTS.includes(value) ? value : "1"; }
+function getFileMoonToken(account: string): string { const normalized = normalizeFileMoonAccount(account); return String(process.env[`FILEMOON_API_TOKEN_${normalized}`] || (normalized === "1" ? process.env.FILEMOON_API_TOKEN : "") || "").trim(); }
 
 const originalListen = express.application.listen;
 (express.application as any).listen = function(this: any, ...args: any[]) {
@@ -46,7 +48,7 @@ const originalListen = express.application.listen;
     let tempPath = "";
     try {
       if (!(await requireAdmin(req, res))) return;
-      const account = String(req.body?.filemoon_account || "1").trim() === "2" ? "2" : "1";
+      const account = normalizeFileMoonAccount(req.body?.filemoon_account);
       const token = getFileMoonToken(account);
       if (!token) return res.status(500).json({ error: `FileMoon Account ${account} is not configured. Set FILEMOON_API_TOKEN_${account} on Railway.` });
       if (!req.file) return res.status(400).json({ error: "No video file uploaded" });
@@ -57,7 +59,6 @@ const originalListen = express.application.listen;
       const CHUNK_SIZE = 90 * 1024 * 1024;
       const totalChunks = Math.max(1, Math.ceil(fileSize / CHUNK_SIZE));
       const uploadId = crypto.randomUUID();
-
       const sendRequest = async (chunkIndex: number): Promise<{ statusCode:number; body:string; retryAfter?:number; requestId?:string }> => {
         const start = chunkIndex * CHUNK_SIZE;
         const endExclusive = Math.min(fileSize, start + CHUNK_SIZE);
@@ -74,7 +75,6 @@ const originalListen = express.application.listen;
           request.on("timeout", () => request.destroy(new Error("FileMoon upload timed out"))); request.on("error", reject); form.pipe(request);
         });
       };
-
       let finalResponse: any = null;
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
         let upstream = await sendRequest(chunkIndex);
@@ -115,8 +115,9 @@ const originalListen = express.application.listen;
   this.post("/api/filemoon/sync", async (req: any, res: any) => {
     try {
       if (!(await requireAdmin(req, res))) return;
-      const account = String(req.body?.filemoon_account || "1").trim() === "2" ? "2" : "1";
-      const token = getFileMoonToken(account); if (!token) return res.status(500).json({ error: `FileMoon Account ${account} is not configured. Set FILEMOON_API_TOKEN_${account} on Railway.` });
+      const account = normalizeFileMoonAccount(req.body?.filemoon_account);
+      const token = getFileMoonToken(account);
+      if (!token) return res.status(500).json({ error: `FileMoon Account ${account} is not configured. Set FILEMOON_API_TOKEN_${account} on Railway.` });
       let page = 1; const perPage = 100; const allFiles: any[] = [];
       while (true) {
         const response = await fetch(`https://filemoon.org/api/v1/files?page=${page}&per_page=${perPage}`, { headers: { Authorization:`Bearer ${token}`, Accept:"application/json" }, signal: AbortSignal.timeout(30000) });
