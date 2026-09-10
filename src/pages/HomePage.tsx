@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Flame, Clock, Sparkles, Play, ArrowRight, Compass, ShieldCheck } from 'lucide-react';
+import { Flame, Clock, Sparkles, Play, ArrowRight, Compass, ChevronLeft, ChevronRight } from 'lucide-react';
 import { videoService } from '../services/videoService';
 import { interactionService } from '../services/interactionService';
 import { Video, Category, WatchHistoryItem } from '../types';
@@ -9,71 +9,180 @@ import { ReportModal } from '../components/video/ReportModal';
 import { ShareModal } from '../components/video/ShareModal';
 import { useAuth } from '../context/AuthContext';
 
+const PAGE_SIZE = 10;
+
+const Pagination: React.FC<{
+  page: number;
+  total: number;
+  onChange: (page: number) => void;
+}> = ({ page, total, onChange }) => {
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  if (totalPages <= 1) return null;
+
+  const changePage = (nextPage: number) => {
+    const safePage = Math.min(Math.max(nextPage, 1), totalPages);
+    if (safePage !== page) {
+      onChange(safePage);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+      <button
+        type="button"
+        onClick={() => changePage(page - 1)}
+        disabled={page === 1}
+        className="w-9 h-9 rounded-lg border border-white/10 bg-[#0a0a0a] text-zinc-300 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:border-amber-500/40 hover:text-amber-400 transition-colors"
+        aria-label="Previous page"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+
+      {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
+        <button
+          key={pageNumber}
+          type="button"
+          onClick={() => changePage(pageNumber)}
+          className={`min-w-9 h-9 px-2 rounded-lg border text-xs font-semibold transition-colors ${
+            pageNumber === page
+              ? 'bg-amber-500 text-black border-amber-500'
+              : 'bg-[#0a0a0a] text-zinc-400 border-white/10 hover:border-amber-500/40 hover:text-white'
+          }`}
+        >
+          {pageNumber}
+        </button>
+      ))}
+
+      <button
+        type="button"
+        onClick={() => changePage(page + 1)}
+        disabled={page === totalPages}
+        className="w-9 h-9 rounded-lg border border-white/10 bg-[#0a0a0a] text-zinc-300 flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:border-amber-500/40 hover:text-amber-400 transition-colors"
+        aria-label="Next page"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
+    </div>
+  );
+};
+
 export const HomePage: React.FC = () => {
   const { user } = useAuth();
 
   const [featuredVideo, setFeaturedVideo] = useState<Video | null>(null);
   const [trendingVideos, setTrendingVideos] = useState<Video[]>([]);
   const [latestVideos, setLatestVideos] = useState<Video[]>([]);
+  const [trendingTotal, setTrendingTotal] = useState(0);
+  const [latestTotal, setLatestTotal] = useState(0);
+  const [categoryTotal, setCategoryTotal] = useState(0);
   const [continueWatching, setContinueWatching] = useState<WatchHistoryItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [isLoading, setIsLoading] = useState(true);
+  const [trendingPage, setTrendingPage] = useState(1);
+  const [latestPage, setLatestPage] = useState(1);
+  const [categoryPage, setCategoryPage] = useState(1);
+  const [isTrendingLoading, setIsTrendingLoading] = useState(true);
+  const [isLatestLoading, setIsLatestLoading] = useState(true);
 
   // Modals
   const [reportVideo, setReportVideo] = useState<Video | null>(null);
   const [shareVideo, setShareVideo] = useState<Video | null>(null);
 
+  // Load categories and continue-watching independently.
   useEffect(() => {
-    async function loadData() {
-      setIsLoading(true);
+    async function loadSupportingData() {
       try {
-        const [cats, trendingRes, latestRes] = await Promise.all([
-          videoService.getCategories(),
-          videoService.getVideos({ sortBy: 'trending', pageSize: 8 }),
-          videoService.getVideos({ sortBy: 'latest', pageSize: 8 }),
-        ]);
-
+        const cats = await videoService.getCategories();
         setCategories(cats);
-        setTrendingVideos(trendingRes.videos);
-        setLatestVideos(latestRes.videos);
 
-        if (trendingRes.videos.length > 0) {
-          setFeaturedVideo(trendingRes.videos[0]);
-        }
-
-        // Load continue watching for current user
         if (user) {
           const history = await interactionService.getWatchHistory(user.id);
           setContinueWatching(history.slice(0, 4));
+        } else {
+          setContinueWatching([]);
         }
       } catch (err) {
-        console.error('Failed to load home page data:', err);
-      } finally {
-        setIsLoading(false);
+        console.error('Failed to load home supporting data:', err);
       }
     }
 
-    loadData();
+    loadSupportingData();
   }, [user]);
 
-  const handleCategoryFilter = async (catId: string) => {
+  // Trending: only fetch the requested 10-video page.
+  useEffect(() => {
+    async function loadTrending() {
+      setIsTrendingLoading(true);
+      try {
+        const res = await videoService.getVideos({
+          sortBy: 'trending',
+          page: trendingPage,
+          pageSize: PAGE_SIZE,
+        });
+        setTrendingVideos(res.videos);
+        setTrendingTotal(res.total);
+
+        if (trendingPage === 1) {
+          setFeaturedVideo(res.videos[0] || null);
+        }
+      } catch (err) {
+        console.error('Failed to load home trending videos:', err);
+        setTrendingVideos([]);
+        setTrendingTotal(0);
+        if (trendingPage === 1) setFeaturedVideo(null);
+      } finally {
+        setIsTrendingLoading(false);
+      }
+    }
+
+    loadTrending();
+  }, [trendingPage]);
+
+  // Latest / category: only fetch the requested 10-video page.
+  useEffect(() => {
+    async function loadLatest() {
+      setIsLatestLoading(true);
+      try {
+        const res = await videoService.getVideos({
+          categoryId: selectedCategory === 'all' ? undefined : selectedCategory,
+          sortBy: selectedCategory === 'all' ? 'latest' : undefined,
+          page: selectedCategory === 'all' ? latestPage : categoryPage,
+          pageSize: PAGE_SIZE,
+        });
+        setLatestVideos(res.videos);
+        if (selectedCategory === 'all') {
+          setLatestTotal(res.total);
+        } else {
+          setCategoryTotal(res.total);
+        }
+      } catch (err) {
+        console.error('Failed to load home latest/category videos:', err);
+        setLatestVideos([]);
+        if (selectedCategory === 'all') setLatestTotal(0);
+        else setCategoryTotal(0);
+      } finally {
+        setIsLatestLoading(false);
+      }
+    }
+
+    loadLatest();
+  }, [selectedCategory, latestPage, categoryPage]);
+
+  const handleCategoryFilter = (catId: string) => {
     setSelectedCategory(catId);
-    setIsLoading(true);
-    const { videos } = await videoService.getVideos({
-      categoryId: catId === 'all' ? undefined : catId,
-      pageSize: 12,
-    });
-    setLatestVideos(videos);
-    setIsLoading(false);
+    setCategoryPage(1);
+    setLatestPage(1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  const latestTotalForPagination = selectedCategory === 'all' ? latestTotal : categoryTotal;
+  const latestPageForPagination = selectedCategory === 'all' ? latestPage : categoryPage;
 
   return (
     <div className="space-y-10">
-
-
       {/* Hero Featured Video Banner */}
-      {featuredVideo && selectedCategory === 'all' && (
+      {featuredVideo && selectedCategory === 'all' && trendingPage === 1 && (
         <div className="relative rounded-2xl sm:rounded-3xl overflow-hidden border border-white/10 bg-[#0a0a0a] shadow-2xl">
           <div className="absolute inset-0">
             <img
@@ -116,14 +225,14 @@ export const HomePage: React.FC = () => {
                 />
                 <span className="text-white font-medium">{featuredVideo.creator?.display_name}</span>
                 <span>•</span>
-                <span>{(featuredVideo.views).toLocaleString()} views</span>
+                <span>{featuredVideo.views.toLocaleString()} views</span>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Continue Watching (if user has active history) */}
+      {/* Continue Watching */}
       {continueWatching.length > 0 && selectedCategory === 'all' && (
         <section className="space-y-4">
           <div className="flex items-center justify-between px-3 sm:px-0">
@@ -152,7 +261,6 @@ export const HomePage: React.FC = () => {
                       alt={item.video.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                     />
-                    {/* Progress Bar overlay */}
                     <div className="absolute bottom-0 inset-x-0 h-1 bg-[#1a1a1a]">
                       <div className="h-full bg-amber-500" style={{ width: `${percent}%` }} />
                     </div>
@@ -170,40 +278,70 @@ export const HomePage: React.FC = () => {
             })}
           </div>
         </section>
-
-            )}
-
-      {/* Trending Section */}
-      {trendingVideos.length > 0 && selectedCategory === 'all' && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between px-3 sm:px-0">
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <Flame className="w-5 h-5 text-amber-500 fill-amber-500/20" />
-              Trending Now
-            </h2>
-          </div>
-          <VideoGrid
-            videos={trendingVideos}
-            isLoading={isLoading}
-            onOpenReport={setReportVideo}
-            onOpenShare={setShareVideo}
-          />
-        </section>
       )}
 
-      {/* Latest / All Videos */}
+      {/* Trending Section */}
       <section className="space-y-4">
         <div className="flex items-center justify-between px-3 sm:px-0">
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Flame className="w-5 h-5 text-amber-500 fill-amber-500/20" />
+            Trending Now
+          </h2>
+        </div>
+        <VideoGrid
+          videos={trendingVideos}
+          isLoading={isTrendingLoading}
+          onOpenReport={setReportVideo}
+          onOpenShare={setShareVideo}
+        />
+        <Pagination page={trendingPage} total={trendingTotal} onChange={setTrendingPage} />
+      </section>
+
+      {/* Latest / Category Section */}
+      <section className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-3 sm:px-0">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2">
             <Compass className="w-5 h-5 text-emerald-500" />
             {selectedCategory === 'all' ? 'Latest Uploads' : 'Explore Category'}
           </h2>
+
+          {categories.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleCategoryFilter('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  selectedCategory === 'all' ? 'bg-amber-500 text-black' : 'text-zinc-400 hover:text-white bg-[#0a0a0a] border border-white/10'
+                }`}
+              >
+                All
+              </button>
+              {categories.map((category) => (
+                <button
+                  key={category.id}
+                  type="button"
+                  onClick={() => handleCategoryFilter(category.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    selectedCategory === category.id ? 'bg-amber-500 text-black' : 'text-zinc-400 hover:text-white bg-[#0a0a0a] border border-white/10'
+                  }`}
+                >
+                  {category.name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+
         <VideoGrid
           videos={latestVideos}
-          isLoading={isLoading}
+          isLoading={isLatestLoading}
           onOpenReport={setReportVideo}
           onOpenShare={setShareVideo}
+        />
+        <Pagination
+          page={latestPageForPagination}
+          total={latestTotalForPagination}
+          onChange={selectedCategory === 'all' ? setLatestPage : setCategoryPage}
         />
       </section>
 
