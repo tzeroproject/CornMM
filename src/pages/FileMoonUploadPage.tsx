@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Upload, Loader2, Copy, Check } from 'lucide-react';
+import { Upload, Loader2, Copy, Check, RefreshCw } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { videoService } from '../services/videoService';
 import { supabase } from '../lib/supabase';
@@ -12,7 +12,9 @@ export default function FileMoonUploadPage() {
   const [categoryId, setCategoryId] = useState('');
   const [categories, setCategories] = useState<Category[]>([]);
   const [file, setFile] = useState<File | null>(null);
+  const [filemoonAccount, setFilemoonAccount] = useState<'1' | '2'>('1');
   const [uploading, setUploading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -22,12 +24,39 @@ export default function FileMoonUploadPage() {
 
   useEffect(() => { videoService.getCategories().then(setCategories).catch(() => setCategories([])); }, []);
 
+  const getToken = async () => {
+    const session = await supabase.auth.getSession();
+    const token = session.data.session?.access_token;
+    if (!token) throw new Error('Your session has expired. Please sign in again.');
+    return token;
+  };
+
   const selectFile = (value?: File) => {
     setError(''); setSuccess(''); setEmbedLink(''); setCopied(false);
     if (!value) return;
     if (!value.type.startsWith('video/')) return setError('Please select a valid video file.');
     if (value.size > 1024 * 1024 * 1024) return setError('Video file must be 1GB or smaller.');
     setFile(value);
+  };
+
+  const syncAccount = async (account: '1' | '2') => {
+    if (!user) return setError('Please sign in before syncing.');
+    if (!isAdmin) return setError('Admin access required for FileMoon sync.');
+    try {
+      setError(''); setSuccess(''); setSyncing(true); setFilemoonAccount(account);
+      const token = await getToken();
+      const response = await fetch('/api/filemoon/sync', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filemoon_account: account }),
+      });
+      let data: any = {};
+      try { data = await response.json(); } catch {}
+      if (!response.ok) throw new Error(data?.error || `FileMoon Account ${account} sync failed (${response.status}).`);
+      setSuccess(`FileMoon Account ${account} sync completed: ${data.imported || 0} imported, ${data.updated || 0} updated, ${data.total || 0} files checked.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'FileMoon sync failed.');
+    } finally { setSyncing(false); }
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -39,16 +68,13 @@ export default function FileMoonUploadPage() {
 
     try {
       setUploading(true);
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
-      if (!token) throw new Error('Your session has expired. Please sign in again.');
-
+      const token = await getToken();
       const form = new FormData();
       form.append('file', file);
       form.append('title', title.trim());
       form.append('description', description.trim());
       if (categoryId) form.append('category_id', categoryId);
-      form.append('filemoon_account', '1');
+      form.append('filemoon_account', filemoonAccount);
 
       const result = await new Promise<any>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -74,9 +100,8 @@ export default function FileMoonUploadPage() {
       if (!fileId) throw new Error('FileMoon did not return a file ID.');
       if (!result.savedToSupabase || !result.videoId) throw new Error('FileMoon upload succeeded, but the Webapp video record was not saved.');
 
-      const embedUrl = String(result.embedUrl || result.videoUrl || `https://filemoon.org/${encodeURIComponent(fileId)}/embed`);
       setEmbedLink(`${window.location.origin}/embed/${encodeURIComponent(result.videoId)}`);
-      setSuccess('FileMoon upload + Supabase + Webapp save completed successfully.');
+      setSuccess(`FileMoon Account ${filemoonAccount} upload + Supabase + Webapp save completed successfully.`);
       setTitle(''); setDescription(''); setCategoryId(''); setFile(null); setProgress(0);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed.');
@@ -89,5 +114,32 @@ export default function FileMoonUploadPage() {
     catch { setError('Could not copy the embed link.'); }
   };
 
-  return <div className="min-h-screen bg-black text-white p-6 md:p-10"><div className="max-w-3xl mx-auto space-y-6"><div><h1 className="text-3xl font-black">FileMoon Upload</h1><p className="text-sm text-zinc-400 mt-1">Upload once: FileMoon stores the video and CornMM automatically saves the Webapp record in Supabase.</p></div><form onSubmit={submit} className="space-y-6"><div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4"><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Video title" className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white"/><textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Optional description" className="w-full h-24 px-4 py-3 rounded-xl bg-black border border-white/10 text-white"/><select value={categoryId} onChange={e=>setCategoryId(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white"><option value="">No category</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div onClick={()=>inputRef.current?.click()} className="border border-dashed border-white/10 rounded-3xl p-10 text-center cursor-pointer bg-[#0a0a0a] hover:border-white/20"><input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" className="hidden" onChange={e=>selectFile(e.target.files?.[0])}/><Upload className="w-10 h-10 text-amber-400 mx-auto mb-3"/><h3 className="font-bold">{file?file.name:'Select a video file'}</h3><p className="text-xs text-zinc-400 mt-1">MP4, WebM, MOV, or MKV up to 1GB</p></div>{uploading&&<div className="text-sm text-zinc-300">Uploading to FileMoon... {progress}%</div>}{error&&<div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm break-words">{error}</div>}{success&&<div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">{success}</div>}{embedLink&&<div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-3"><div className="text-xs text-amber-300 font-bold">Unique CornMM Embed Link</div><div className="flex gap-2"><input readOnly value={embedLink} className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-black border border-white/10 text-white text-sm"/><button type="button" onClick={copyLink} className="px-3 py-2 rounded-lg bg-amber-500 text-black font-bold">{copied?<Check className="w-4 h-4"/>:<Copy className="w-4 h-4"/>}</button></div></div>}<button disabled={uploading} className="w-full py-3 rounded-xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">{uploading&&<Loader2 className="w-4 h-4 animate-spin"/>}{uploading?'Uploading...':'Upload to FileMoon'}</button></form></div></div>;
+  return <div className="min-h-screen bg-black text-white p-6 md:p-10"><div className="max-w-3xl mx-auto space-y-6">
+    <div><h1 className="text-3xl font-black">FileMoon Upload & Sync</h1><p className="text-sm text-zinc-400 mt-1">Choose Account 1 or Account 2. Uploads and syncs are saved to Supabase automatically.</p></div>
+
+    <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4">
+      <div className="text-sm font-bold">FileMoon Account Sync</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <button type="button" disabled={syncing} onClick={() => syncAccount('1')} className="py-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-bold flex items-center justify-center gap-2 disabled:opacity-50"><RefreshCw className={`w-4 h-4 ${syncing && filemoonAccount === '1' ? 'animate-spin' : ''}`}/>Sync Account 1</button>
+        <button type="button" disabled={syncing} onClick={() => syncAccount('2')} className="py-3 rounded-xl bg-amber-500 text-black hover:bg-amber-400 font-bold flex items-center justify-center gap-2 disabled:opacity-50"><RefreshCw className={`w-4 h-4 ${syncing && filemoonAccount === '2' ? 'animate-spin' : ''}`}/>Sync Account 2</button>
+      </div>
+      <p className="text-xs text-zinc-500">Sync reads FileMoon files and imports missing videos into the Supabase videos table.</p>
+    </div>
+
+    <form onSubmit={submit} className="space-y-6">
+      <div className="p-6 rounded-3xl bg-[#0a0a0a] border border-white/10 space-y-4">
+        <div><label className="block text-sm font-bold mb-2">FileMoon Account</label><select value={filemoonAccount} onChange={e=>setFilemoonAccount(e.target.value === '2' ? '2' : '1')} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white"><option value="1">Account 1</option><option value="2">Account 2</option></select></div>
+        <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Video title" className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white"/>
+        <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Optional description" className="w-full h-24 px-4 py-3 rounded-xl bg-black border border-white/10 text-white"/>
+        <select value={categoryId} onChange={e=>setCategoryId(e.target.value)} className="w-full px-4 py-3 rounded-xl bg-black border border-white/10 text-white"><option value="">No category</option>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
+      </div>
+      <div onClick={()=>inputRef.current?.click()} className="border border-dashed border-white/10 rounded-3xl p-10 text-center cursor-pointer bg-[#0a0a0a] hover:border-white/20"><input ref={inputRef} type="file" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" className="hidden" onChange={e=>selectFile(e.target.files?.[0])}/><Upload className="w-10 h-10 text-amber-400 mx-auto mb-3"/><h3 className="font-bold">{file?file.name:'Select a video file'}</h3><p className="text-xs text-zinc-400 mt-1">MP4, WebM, MOV, or MKV up to 1GB</p></div>
+      {uploading&&<div className="text-sm text-zinc-300">Uploading to FileMoon Account {filemoonAccount}... {progress}%</div>}
+      {syncing&&<div className="text-sm text-zinc-300">Syncing FileMoon Account {filemoonAccount}...</div>}
+      {error&&<div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-300 text-sm break-words">{error}</div>}
+      {success&&<div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-sm">{success}</div>}
+      {embedLink&&<div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-3"><div className="text-xs text-amber-300 font-bold">Unique CornMM Embed Link</div><div className="flex gap-2"><input readOnly value={embedLink} className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-black border border-white/10 text-white text-sm"/><button type="button" onClick={copyLink} className="px-3 py-2 rounded-lg bg-amber-500 text-black font-bold">{copied?<Check className="w-4 h-4"/>:<Copy className="w-4 h-4"/>}</button></div></div>}
+      <button disabled={uploading || syncing} className="w-full py-3 rounded-xl bg-amber-500 text-black font-black disabled:opacity-50 flex items-center justify-center gap-2">{uploading&&<Loader2 className="w-4 h-4 animate-spin"/>}{uploading?'Uploading...':'Upload to FileMoon Account '+filemoonAccount}</button>
+    </form>
+  </div></div>;
 }
