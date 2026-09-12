@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import type { Video } from '../types';
 
 const SITE_NAME = 'CornMM';
-const SITE_URL = (import.meta.env.VITE_SITE_URL || 'https://cornmm.site').replace(/\/$/, '');
+const SITE_URL = (import.meta.env.VITE_SITE_URL || 'https://cornmm.com').replace(/\/$/, '');
 const DEFAULT_DESCRIPTION = 'Watch trending and latest adult videos on CornMM. Explore Myanmar and Asian videos with a fast, mobile-friendly viewing experience.';
 
 const PAGE_META: Record<string, { title: string; description: string; index?: boolean }> = {
