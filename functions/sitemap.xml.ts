@@ -1,4 +1,4 @@
-const SITE_URL = 'https://cornmm.site';
+const SITE_URL = 'https://cornmm.com';
 const API_URL = 'https://cornmm-production.up.railway.app/api/videos';
 
 type ApiVideo = {
