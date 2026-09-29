@@ -6,7 +6,7 @@ const API_ORIGIN = String((import.meta as any).env?.VITE_API_ORIGIN || 'https://
 async function authHeaders(): Promise<Record<string,string>> {
   try {
     const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ? { Authorization: `${data.session.access_token}` } : {};
+    return data.session?.access_token ? { Authorization: `Bearer ${data.session.access_token}` } : {};
   } catch {
     return {};
   }
