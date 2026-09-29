@@ -12,6 +12,30 @@ const PORT = Number(process.env.PORT || 3000);
 const upload = multer({ dest: "/tmp/uploads/" });
 app.use(express.json({ limit: "10mb" }));
 
+// Allow the Netlify/Cloudflare frontend to call the Railway API.
+const allowedOrigins = new Set([
+  "https://cornmm.com",
+  "https://www.cornmm.com",
+  "https://cornmm.netlify.app",
+  "https://cornmm.site",
+  "https://www.cornmm.site",
+  "http://localhost:5173",
+  "http://localhost:3000",
+]);
+
+app.use((req, res, next) => {
+  const origin = String(req.headers.origin || "");
+  if (allowedOrigins.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+  }
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
+
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const hasValidSupabase = Boolean(supabaseUrl && supabaseServiceKey);
